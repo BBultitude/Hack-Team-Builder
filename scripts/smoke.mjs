@@ -44,7 +44,7 @@ await step('dex data loaded', async () => {
 
 await step('picking a suggestion adds to roster and team', async () => {
   await page.click('.suggest-list button:has-text("Charizard")')
-  await page.waitForSelector('text=Team (1/6)', { timeout: 5000 })
+  await page.waitForSelector('h2:has-text("team 1/6")', { timeout: 5000 })
 })
 
 await step('add field clears after a pick', async () => {
@@ -59,9 +59,26 @@ await step('adds eight Pokemon', async () => {
   await page.waitForSelector('text=Your Pokémon (8)', { timeout: 5000 })
 })
 
+await step('evolve keeps the slot and nature', async () => {
+  await add('Eevee')
+  await page.locator('.card:has-text("Eevee") button:has-text("Evolve → Vaporeon")').click()
+  await page.waitForSelector('.editor-head:has-text("Vaporeon")', { timeout: 5000 })
+  await page.waitForSelector('text=Your Pokémon (9)', { timeout: 5000 })
+})
+
+await step('remove needs a second tap', async () => {
+  await page.locator('.card:has-text("Vaporeon") button:has-text("Remove Vaporeon")').click()
+  await page.locator('button:has-text("Cancel")').click()
+  await page.waitForSelector('text=Your Pokémon (9)', { timeout: 5000 })
+  await page.locator('.card:has-text("Vaporeon") button:has-text("Remove Vaporeon")').click()
+  await page.locator('button:has-text("Yes, remove")').click()
+  await page.waitForSelector('text=Your Pokémon (8)', { timeout: 5000 })
+})
+
 await step('auto-build fills exactly six', async () => {
+  await page.click('button[role="tab"]:has-text("Best Team")')
   await page.click('button:has-text("Auto-build")')
-  await page.waitForSelector('text=Team (6/6)', { timeout: 5000 })
+  await page.waitForSelector('h2:has-text("Team (6/6)")', { timeout: 5000 })
 })
 
 await step('defensive matrix covers all 18 types x 6 members', async () => {
@@ -119,8 +136,26 @@ await step('team score is reported', async () => {
   console.log(`        ${txt.replace(/\s+/g, ' ').trim()}`)
 })
 
+await step('recommends four moves per member', async () => {
+  const lists = await page.locator('ol.moves').count()
+  if (lists !== 6) throw new Error(`expected 6 move lists, got ${lists}`)
+  const items = await page.locator('ol.moves').first().locator('li').count()
+  if (items !== 4) throw new Error(`expected 4 moves, got ${items}`)
+})
+
+await step('look for lists catchable targets with a catch plan', async () => {
+  await page.click('button[role="tab"]:has-text("Look For")')
+  await page.waitForSelector('h2:has-text("Pokémon to look for")', { timeout: 5000 })
+  await page.locator('summary:has-text("How to catch")').first().click()
+  const plan = await page.locator('details[open] ol.moves').first().innerText()
+  if (!/Quick Ball/.test(plan)) throw new Error(`unexpected plan: ${plan}`)
+  console.log('        ' + plan.split('\n')[0])
+})
+
 await step('editing a move updates the member', async () => {
+  await page.click('button[role="tab"]:has-text("Pokédex")')
   await page.locator('.card:has-text("Charizard") .editor-head').first().click()
+  await page.locator('.card:has-text("Charizard") summary').first().click()
   const field = page.locator('.card:has-text("Charizard") input[placeholder^="Move"]').first()
   await field.fill('Earthquake')
   await page.locator('.suggest-list button:text-is("Earthquake")').click()
@@ -141,7 +176,7 @@ await step('opponent tab ranks with reasons', async () => {
 
 await step('focusing a field does not scroll the page', async () => {
   await page.evaluate(() => window.scrollTo(0, 0))
-  await page.click('button[role="tab"]:has-text("Team")')
+  await page.click('button[role="tab"]:has-text("Pokédex")')
   await page.evaluate(() => window.scrollTo(0, 0))
   const before = await page.evaluate(() => window.scrollY)
   await page.focus(addBox)
@@ -166,6 +201,7 @@ await step('a list that would be cut off is scrolled into view', async () => {
   await page.setViewportSize({ width: 390, height: 420 })
   const field = page.locator('.card:has-text("Dragonite") input[placeholder^="Move"]').first()
   await page.locator('.card:has-text("Dragonite") .editor-head').first().click()
+  await page.locator('.card:has-text("Dragonite") summary').first().click()
   await field.scrollIntoViewIfNeeded()
   await field.fill('Earth')
   await page.waitForSelector('.suggest-list button')
@@ -185,7 +221,7 @@ await step('a list that would be cut off is scrolled into view', async () => {
 await step('state survives a reload', async () => {
   await page.reload({ waitUntil: 'networkidle' })
   await page.waitForSelector('text=Your Pokémon (8)', { timeout: 15000 })
-  await page.waitForSelector('text=Team (6/6)', { timeout: 5000 })
+  await page.waitForSelector('h2:has-text("team 6/6")', { timeout: 5000 })
 })
 
 await step('no horizontal overflow at 390px', async () => {

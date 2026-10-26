@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import type { RosterEntry } from '../types'
 import { data, lookup, typeIndex, dexIndex } from './testData'
-import { incomingMultiplier, resolveMember } from './member'
-import { analyseTeam, autoBuild, learnableFixes, suggestAdditions, MAX_TEAM } from './team'
+import { evolutionPath, evolve, incomingMultiplier, resolveMember } from './member'
+import { analyseTeam, autoBuild, lookFor, recommendMoves, suggestAdditions, MAX_TEAM } from './team'
 
 const t = typeIndex
 
@@ -159,23 +159,90 @@ describe('team reporting', () => {
   })
 })
 
-describe('learnable fixes', () => {
-  it('suggests a move that would cover a gap, ranked with the type bonus', () => {
-    const team = [member(own('Charizard'))]
-    const a = analyseTeam(data, team)
-    const fixes = learnableFixes(data, team, a.uncovered)
-
-    expect(fixes.length).toBeGreaterThan(0)
-    for (const fix of fixes) {
-      // Every suggestion must actually beat the type it was chosen for.
-      expect(data.chart.matrix[fix.move.t]![fix.type]!).toBeGreaterThan(1)
-      expect(fix.rating).toBe(fix.move.p * (fix.stab ? 1.5 : 1))
-    }
+describe('recommended moves', () => {
+  it('picks four moves of different types, Same-Type Attack Bonus first', () => {
+    const [recs] = recommendMoves(data, [member(own('Charizard'))])
+    expect(recs).toHaveLength(4)
+    expect(new Set(recs!.map((r) => r.move.t)).size).toBe(4)
+    expect(recs!.some((r) => r.stab)).toBe(true)
+    expect(recs!.every((r) => r.move.p > 0)).toBe(true)
   })
 
-  it('skips custom Pokemon, which have no vanilla learnset', () => {
-    const custom = member({ ...own('Charizard'), d: -1 })
-    expect(learnableFixes(data, [custom], [t('Water')])).toEqual([])
+  it('never suggests self-KO or recharge moves', () => {
+    const recs = recommendMoves(data, [member(own('Snorlax')), member(own('Electrode'))]).flatMap((r) => r ?? [])
+    for (const r of recs) expect(['Explosion', 'Self-Destruct', 'Hyper Beam', 'Giga Impact']).not.toContain(r.move.n)
+  })
+
+  it('has teammates complement each other rather than repeat coverage', () => {
+    const recs = recommendMoves(data, [member(own('Charizard')), member(own('Blastoise'))])
+    const first = new Set(recs[0]!.flatMap((r) => r.covers))
+    for (const r of recs[1]!) for (const t of r.covers) expect(first.has(t)).toBe(false)
+  })
+
+  it('returns null for custom Pokemon, which have no vanilla learnset', () => {
+    expect(recommendMoves(data, [member({ ...own('Charizard'), d: -1 })])).toEqual([null])
+  })
+})
+
+describe('look for', () => {
+  const roster = ['Charizard', 'Gengar', 'Snorlax'].map((n) => own(n))
+
+  it('skips owned families and anything not realistically catchable', () => {
+    const out = lookFor(data, lookup, roster, [0, 1, 2], 50)
+    const owned = new Set(roster.map((e) => data.dex[e.d]!.fm))
+    for (const t of out) {
+      expect(data.dex[t.index]!.ok).toBe(1)
+      expect(owned.has(data.dex[t.index]!.fm)).toBe(false)
+    }
+    expect(out.map((t) => data.dex[t.index]!.n)).not.toContain('Mewtwo')
+  })
+
+  it('lists one species per family, best gain first', () => {
+    const out = lookFor(data, lookup, roster, [0, 1, 2], 50)
+    expect(new Set(out.map((t) => data.dex[t.index]!.fm)).size).toBe(out.length)
+    for (let i = 1; i < out.length; i++) expect(out[i - 1]!.gain).toBeGreaterThanOrEqual(out[i]!.gain)
+    expect(out.every((t) => t.gain > 0)).toBe(true)
+  })
+
+  it('says to catch an easier earlier stage when there is one', () => {
+    const snorlax = data.dex[dexIndex('Snorlax')]!
+    expect(snorlax.cf).toBe(dexIndex('Munchlax'))
+    // Equal capture rates still point at the first stage: you find Squirtle, not Blastoise.
+    expect(data.dex[dexIndex('Blastoise')]!.cf).toBe(dexIndex('Squirtle'))
+    expect(evolutionPath(data, dexIndex('Squirtle'), dexIndex('Blastoise')).map((i) => data.dex[i]!.n))
+      .toEqual(['Squirtle', 'Wartortle', 'Blastoise'])
+  })
+})
+
+describe('evolve', () => {
+  it('keeps nature, moves and team position, and drops stat overrides', () => {
+    const before = own('Bulbasaur', { nt: 3, mv: ['Vine Whip', '', '', ''], st: [1, 1, 1, 1, 1, 1], ab: 'Overgrow' })
+    const after = evolve(data, before, dexIndex('Ivysaur'))
+    expect(after).toMatchObject({ n: 'Ivysaur', nt: 3, mv: ['Vine Whip', '', '', ''], st: null, ab: 'Overgrow' })
+    expect(after.d).toBe(dexIndex('Ivysaur'))
+  })
+
+  it('switches to the new form ability when the old one does not carry over', () => {
+    const after = evolve(data, own('Eevee', { ab: 'Run Away' }), dexIndex('Vaporeon'))
+    expect(after.ab).toBe('Water Absorb')
+  })
+
+  it('keeps regional lines apart', () => {
+    const names = (n: string) => (data.dex[dexIndex(n)]!.ev ?? []).map((i) => data.dex[i]!.n)
+    expect(names('Vulpix')).toEqual(['Ninetales'])
+    expect(names('Vulpix (Alola)')).toEqual(['Ninetales (Alola)'])
+    expect(data.dex[dexIndex('Vulpix (Alola)')]!.eh).toEqual(['use an Ice Stone'])
+    expect(names('Meowth (Galar)')).toEqual(['Perrserker'])
+    expect(data.dex[dexIndex('Ninetales (Alola)')]!.cf).toBe(dexIndex('Vulpix (Alola)'))
+    // Babies hatch from eggs; on equal odds the wild stage is the one to look for.
+    expect(data.dex[dexIndex('Raichu')]!.cf).toBe(dexIndex('Pikachu'))
+  })
+
+  it('knows every Eevee evolution and how to reach it', () => {
+    const eevee = data.dex[dexIndex('Eevee')]!
+    expect(eevee.ev).toHaveLength(8)
+    expect(eevee.eh?.[0]).toBe('use a Water Stone')
+    expect(data.dex[dexIndex('Bulbasaur')]!.eh).toEqual(['level 16'])
   })
 })
 

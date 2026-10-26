@@ -13,6 +13,18 @@ export interface DexEntry {
   ab: string[]
   /** Hidden abilities. */
   hab: string[]
+  /** Capture rate, 1-255. */
+  cr: number
+  /** Evolution family id; shared by every stage and form of one line. */
+  fm: number
+  /** Dex indices this entry evolves into. */
+  ev?: number[]
+  /** With ev: how to reach each evolution, in words, using the vanilla method. */
+  eh?: string[]
+  /** Set when realistically catchable: no legendaries, events or very rare lines. */
+  ok?: 1
+  /** With ok: the dex index to catch (this entry, or an easier earlier stage). */
+  cf?: number
 }
 
 export interface Move {
@@ -46,6 +58,8 @@ export interface GameData {
   /** learnsets[dexIndex] -> move indices. */
   learnsets: number[][]
   natures: Nature[]
+  /** Catch-helper move name -> dex indices that can learn it. */
+  catchMoves: Record<string, number[]>
 }
 
 /** Stat slots, fixed by the data generator. */

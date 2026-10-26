@@ -1,6 +1,8 @@
+import { useState } from 'preact/hooks'
 import type { GameData, RosterEntry } from '../types'
 import { STAT_NAMES } from '../types'
 import { MODELLED_ABILITIES } from '../logic/abilities'
+import { evolve } from '../logic/member'
 import { Suggest } from './Suggest'
 
 interface Props {
@@ -20,6 +22,7 @@ const NONE = -1
 export function PokemonEditor(props: Props) {
   const { data, entry, onChange } = props
   const vanilla = entry.d >= 0 ? data.dex[entry.d] : undefined
+  const [confirmRemove, setConfirmRemove] = useState(false)
 
   const patch = (fields: Partial<RosterEntry>): void => onChange({ ...entry, ...fields })
 
@@ -41,7 +44,15 @@ export function PokemonEditor(props: Props) {
   return (
     <div class="card">
       <div class="row">
-        <button class="editor-head grow" onClick={props.onToggle} aria-expanded={props.open}>
+        <button
+          class="editor-head grow"
+          onClick={() => {
+            // A half-finished removal never survives closing the card.
+            setConfirmRemove(false)
+            props.onToggle()
+          }}
+          aria-expanded={props.open}
+        >
           <span aria-hidden="true">{props.open ? '▾' : '▸'}</span>
           <span class="grow truncate">
             <strong>{entry.n}</strong>{' '}
@@ -61,6 +72,14 @@ export function PokemonEditor(props: Props) {
         </button>
       </div>
 
+      {vanilla?.ev && (
+        <p class="muted" style="margin:0.4rem 0 0">
+          {vanilla.ev
+            .map((target, i) => `Evolves into ${data.dex[target]?.n}: ${vanilla.eh?.[i] ?? 'special conditions'}.`)
+            .join(' ')}
+        </p>
+      )}
+
       {!entry.ab.trim() && (
         <p class="muted danger" style="margin:0.4rem 0 0">
           No ability set — defensive numbers may be wrong.
@@ -69,32 +88,6 @@ export function PokemonEditor(props: Props) {
 
       {props.open && (
         <div class="editor-body stack">
-          <div class="row">
-            <label class="field grow">
-              <span>Primary type</span>
-              <select
-                value={String(entry.a)}
-                onChange={(e) => patch({ a: Number(e.currentTarget.value) })}
-              >
-                {data.chart.types.map((n, i) => (
-                  <option key={n} value={String(i)}>{n}</option>
-                ))}
-              </select>
-            </label>
-            <label class="field grow">
-              <span>Secondary type</span>
-              <select
-                value={String(entry.b)}
-                onChange={(e) => patch({ b: Number(e.currentTarget.value) })}
-              >
-                <option value={String(NONE)}>None</option>
-                {data.chart.types.map((n, i) => (
-                  <option key={n} value={String(i)}>{n}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-
           <label class="field">
             <span>Ability</span>
             <Suggest
@@ -123,68 +116,123 @@ export function PokemonEditor(props: Props) {
             </select>
           </label>
 
-          <div class="field">
-            <span>Moves</span>
-            <div class="stack">
-              {entry.mv.map((mv, slot) => (
-                <div key={slot}>
-                  <Suggest
-                    value={mv}
-                    placeholder={`Move ${slot + 1}`}
-                    options={moveNames}
-                    onInput={(v) => {
-                      const next = [...entry.mv]
-                      next[slot] = v
-                      patch({ mv: next })
-                    }}
-                    onPick={(v) => {
-                      const next = [...entry.mv]
-                      next[slot] = v
-                      patch({ mv: next })
-                    }}
-                  />
-                  {mv && entry.d >= 0 && !learnable.has(mv) && (
-                    <p class="muted danger" style="margin:0.2rem 0 0">
-                      Not in the vanilla learnset — fine if your hack changed it.
-                    </p>
-                  )}
-                </div>
+          {vanilla?.ev && (
+            <div class="row wrap">
+              <span class="muted" style="flex-basis:100%">
+                Evolved it? Tap to update — nature and moves carry over. Methods are vanilla; hacks
+                often swap trade evolutions for items or levels.
+              </span>
+              {vanilla.ev.map((target) => (
+                <button key={target} onClick={() => onChange(evolve(data, entry, target))}>
+                  Evolve → {data.dex[target]?.n}
+                </button>
               ))}
             </div>
-          </div>
+          )}
 
-          <div class="field">
-            <span>
-              Base stats
-              {statsModified && <strong class="danger"> — modified from vanilla</strong>}
-            </span>
-            <div class="stat-grid">
-              {STAT_NAMES.map((name, i) => (
-                <label key={name} class="field">
-                  <span>{name}</span>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    max={999}
-                    value={String(currentStats[i] ?? 0)}
-                    onInput={(e) => {
-                      const next = [...currentStats]
-                      next[i] = Math.max(1, Number(e.currentTarget.value) || 1)
-                      patch({ st: next })
-                    }}
-                  />
+          <details>
+            <summary>Hack changes (types, moves, base stats)</summary>
+            <div class="stack" style="margin-top:0.6rem">
+              <div class="row">
+                <label class="field grow">
+                  <span>Primary type</span>
+                  <select
+                    value={String(entry.a)}
+                    onChange={(e) => patch({ a: Number(e.currentTarget.value) })}
+                  >
+                    {data.chart.types.map((n, i) => (
+                      <option key={n} value={String(i)}>{n}</option>
+                    ))}
+                  </select>
                 </label>
-              ))}
+                <label class="field grow">
+                  <span>Secondary type</span>
+                  <select
+                    value={String(entry.b)}
+                    onChange={(e) => patch({ b: Number(e.currentTarget.value) })}
+                  >
+                    <option value={String(NONE)}>None</option>
+                    {data.chart.types.map((n, i) => (
+                      <option key={n} value={String(i)}>{n}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div class="field">
+                <span>Moves</span>
+                <div class="stack">
+                  {entry.mv.map((mv, slot) => (
+                    <div key={slot}>
+                      <Suggest
+                        value={mv}
+                        placeholder={`Move ${slot + 1}`}
+                        options={moveNames}
+                        onInput={(v) => {
+                          const next = [...entry.mv]
+                          next[slot] = v
+                          patch({ mv: next })
+                        }}
+                        onPick={(v) => {
+                          const next = [...entry.mv]
+                          next[slot] = v
+                          patch({ mv: next })
+                        }}
+                      />
+                      {mv && entry.d >= 0 && !learnable.has(mv) && (
+                        <p class="muted danger" style="margin:0.2rem 0 0">
+                          Not in the vanilla learnset — fine if your hack changed it.
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div class="field">
+                <span>
+                  Base stats
+                  {statsModified && <strong class="danger"> — modified from vanilla</strong>}
+                </span>
+                <div class="stat-grid">
+                  {STAT_NAMES.map((name, i) => (
+                    <label key={name} class="field">
+                      <span>{name}</span>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        max={999}
+                        value={String(currentStats[i] ?? 0)}
+                        onInput={(e) => {
+                          const next = [...currentStats]
+                          next[i] = Math.max(1, Number(e.currentTarget.value) || 1)
+                          patch({ st: next })
+                        }}
+                      />
+                    </label>
+                  ))}
+                </div>
+                {statsModified && vanilla && (
+                  <button class="link" style="margin-top:0.5rem" onClick={() => patch({ st: null })}>
+                    Reset to vanilla
+                  </button>
+                )}
+              </div>
             </div>
-            {statsModified && vanilla && (
-              <button class="link" style="margin-top:0.5rem" onClick={() => patch({ st: null })}>
-                Reset to vanilla
-              </button>
+          </details>
+
+          <div class="remove-row">
+            {confirmRemove ? (
+              <div class="row wrap">
+                <span class="grow">Remove {entry.n}?</span>
+                <button class="danger" onClick={props.onRemove}>Yes, remove</button>
+                <button onClick={() => setConfirmRemove(false)}>Cancel</button>
+              </div>
+            ) : (
+              <button class="danger" onClick={() => setConfirmRemove(true)}>Remove {entry.n}</button>
             )}
           </div>
-
-          <button class="danger" onClick={props.onRemove}>Remove {entry.n}</button>
         </div>
       )}
     </div>

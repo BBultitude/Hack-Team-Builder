@@ -147,14 +147,14 @@ input[type="number"] { padding-right: 0.2rem; }
 
 .tabs {
   display: flex;
-  gap: 0.4rem;
+  gap: 0.3rem;
   padding: 0.6rem 0.9rem;
   background: var(--bg);
   position: sticky;
   top: 3.1rem;
   z-index: 4;
 }
-.tabs button { flex: 1; }
+.tabs button { flex: 1; padding-inline: 0.2rem; white-space: nowrap; }
 .tabs button[aria-selected="true"] {
   background: var(--accent);
   border-color: var(--accent);
@@ -364,6 +364,19 @@ body.suggest-open main {
   text-align: left;
 }
 .editor-body { margin-top: 0.75rem; }
+/* Kept apart from everything else so it is never hit by accident. */
+.remove-row {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+details > summary {
+  line-height: var(--tap);
+  cursor: pointer;
+  color: var(--muted);
+}
+ol.moves { margin: 0.2rem 0 0; padding-left: 1.3rem; }
+ol.moves li { margin: 0.15rem 0; }
 
 .field { display: block; }
 .field > span {

@@ -24,6 +24,11 @@ const FILES = [
   'pokemon_types',
   'pokemon_stats',
   'pokemon_abilities',
+  'pokemon_species',
+  'pokemon_evolution',
+  'pokemon_forms',
+  'evolution_triggers',
+  'item_names',
   'pokemon_species_names',
   'ability_names',
   'types',
@@ -55,6 +60,26 @@ const TYPE_ORDER = [
   'fighting', 'poison', 'ground', 'flying', 'psychic', 'bug',
   'rock', 'ghost', 'dragon', 'dark', 'steel', 'fairy',
 ]
+
+/** Status and utility moves the catching advice cares about; see src/logic/catching.ts. */
+const CATCH_MOVES = [
+  'false-swipe',
+  'spore', 'sleep-powder', 'hypnosis', 'sing', 'lovely-kiss', 'grass-whistle', 'yawn', 'dark-void',
+  'thunder-wave', 'stun-spore', 'glare',
+]
+
+/** Below this capture rate across a line's catchable stages, it is not a realistic target. */
+const MIN_CAPTURE_RATE = 30
+
+/** Ultra Beasts and Paradox Pokemon: not flagged legendary by PokeAPI, but still one-off or endgame-only. */
+const SPECIAL_ENCOUNTERS = new Set([
+  793, 794, 795, 796, 797, 798, 799, 803, 804, 805, 806,
+  984, 985, 986, 987, 988, 989, 990, 991, 992, 993, 994, 995, 1005, 1006, 1009, 1010,
+  1020, 1021, 1022, 1023,
+])
+
+/** Regional forms are ordinary wild Pokemon; other alternate forms (Megas etc.) are not catchable. */
+const REGIONAL = /-(alola|galar|hisui|paldea)/
 
 const PHYSICAL = '2'
 const SPECIAL = '3'
@@ -259,6 +284,7 @@ async function main(): Promise<void> {
     hab: string[]
     sp: number
     id: number
+    slug: string
   }
   const dex: Entry[] = []
 
@@ -282,7 +308,10 @@ async function main(): Promise<void> {
     }
 
     const row = csv.pokemon.find((p) => p.id === pokemonId)
-    dex.push({ n: name, t: types, s, ab, hab, sp: Number(row?.species_id ?? 0), id: Number(pokemonId) })
+    dex.push({
+      n: name, t: types, s, ab, hab,
+      sp: Number(row?.species_id ?? 0), id: Number(pokemonId), slug: row?.identifier ?? '',
+    })
   }
 
   // Base forms: ids 1..1025.
@@ -351,6 +380,141 @@ async function main(): Promise<void> {
     return inherited ? [...inherited].sort((a, b) => a - b) : []
   })
 
+  // --- evolution, obtainability, catch moves -----------------------------
+
+  const speciesById = new Map(csv.pokemon_species.map((r) => [Number(r.id), r]))
+  const parentOf = (sp: number): number => Number(speciesById.get(sp)?.evolves_from_species_id) || 0
+  const baseIndexBySpecies = new Map<number, number>()
+  dex.forEach((e, i) => { if (e.id <= 1025) baseIndexBySpecies.set(e.sp, i) })
+  const isRegional = (e: Entry): boolean => e.id > 10000 && REGIONAL.test(e.slug)
+  const suffixOf = (e: Entry): string => REGIONAL.exec(e.slug)?.[1] ?? ''
+
+  // How each evolution happens, in words. PokeAPI has a row per game, so the
+  // distinct methods are joined: "use a Leaf Stone, or level up near a Moss Rock".
+  const enItemName = new Map<string, string>()
+  for (const r of csv.item_names) {
+    if (r.local_language_id === String(EN)) enItemName.set(r.item_id!, r.name!)
+  }
+  const triggerSlug = new Map(csv.evolution_triggers.map((r) => [r.id!, r.identifier!]))
+  const describeEvolution = (r: Record<string, string>): string => {
+    const trigger = triggerSlug.get(r.evolution_trigger_id!) ?? ''
+    const name = (id: string | undefined): string => enItemName.get(id ?? '') ?? 'item'
+    const item = (id: string | undefined): string => `${/^[AEIOU]/.test(name(id)) ? 'an' : 'a'} ${name(id)}`
+    const parts: string[] = []
+    if (trigger === 'level-up') parts.push(r.minimum_level ? `level ${r.minimum_level}` : 'level up')
+    else if (trigger === 'trade') parts.push('trade')
+    else if (trigger === 'use-item') parts.push(`use ${item(r.trigger_item_id)}`)
+    else if (trigger === 'gimmighoul-coins') parts.push('level up with 999 Gimmighoul Coins')
+    else if (trigger === 'shed') parts.push('have a free party slot and a spare Poké Ball when Nincada evolves')
+    else parts.push(titleCase(trigger).toLowerCase())
+    if (r.held_item_id) parts.push(`holding ${item(r.held_item_id)}`)
+    if (r.trade_species_id) parts.push(`for ${enSpeciesName.get(r.trade_species_id) ?? 'a specific Pokémon'}`)
+    if (r.minimum_happiness) parts.push('with high friendship')
+    if (r.minimum_affection) parts.push('with high affection')
+    if (r.minimum_beauty) parts.push('with high Beauty')
+    if (r.known_move_id) parts.push(`knowing ${enMoveName.get(r.known_move_id) ?? 'a specific move'}`)
+    if (r.known_move_type_id) parts.push(`knowing a ${typeNames[typeIndexById.get(r.known_move_type_id) ?? -1] ?? ''}-type move`)
+    if (r.party_species_id) parts.push(`with ${enSpeciesName.get(r.party_species_id) ?? 'a specific Pokémon'} in the party`)
+    if (r.party_type_id) parts.push(`with a ${typeNames[typeIndexById.get(r.party_type_id) ?? -1] ?? ''}-type in the party`)
+    if (r.time_of_day) parts.push(r.time_of_day === 'night' ? 'at night' : `during the ${r.time_of_day}`)
+    if (r.gender_id) parts.push(r.gender_id === '1' ? '(female)' : '(male)')
+    if (r.relative_physical_stats) {
+      parts.push({ '1': 'with Attack above Defense', '-1': 'with Defense above Attack', '0': 'with Attack equal to Defense' }[r.relative_physical_stats] ?? '')
+    }
+    if (r.location_id) parts.push('at a special location')
+    if (r.needs_overworld_rain === '1') parts.push('in the rain')
+    if (r.turn_upside_down === '1') parts.push('with the console upside down')
+    return parts.filter(Boolean).join(' ')
+  }
+  // Evolution links between dex entries. Rows name the exact forms when it
+  // matters (Alolan Vulpix -> Alolan Ninetales); a row without forms links
+  // the base forms. Megas and other battle forms never evolve.
+  const indexById = new Map(dex.map((e, i) => [e.id, i]))
+  const pokemonByForm = new Map(csv.pokemon_forms.map((r) => [r.id!, Number(r.pokemon_id)]))
+  const speciesByPokemon = new Map(csv.pokemon.map((r) => [Number(r.id), Number(r.species_id)]))
+  const resolve = (formId: string | undefined, species: number): number | undefined => {
+    const pid = formId ? pokemonByForm.get(formId) : undefined
+    const idx = pid === undefined ? undefined : indexById.get(pid)
+    const e = idx === undefined ? undefined : dex[idx]
+    if (e && (e.id <= 1025 || isRegional(e))) return idx
+    // Forms that share the base typing are not in the dex; use the base.
+    return baseIndexBySpecies.get(pid === undefined ? species : speciesByPokemon.get(pid) ?? species)
+  }
+  const howByEdge = new Map<string, string[]>()
+  const ev: number[][] = dex.map(() => [])
+  const parentIdx = new Map<number, number>()
+  for (const r of csv.pokemon_evolution) {
+    const childSp = Number(r.evolved_species_id)
+    const from = resolve(r.required_pokemon_form_id, parentOf(childSp))
+    const to = resolve(r.evolved_pokemon_form_id, childSp)
+    if (from === undefined || to === undefined) continue
+    if (!ev[from]!.includes(to)) ev[from]!.push(to)
+    if (!parentIdx.has(to)) parentIdx.set(to, from)
+    const key = `${from}>${to}`
+    const list = howByEdge.get(key) ?? []
+    const text = describeEvolution(r)
+    if (!list.includes(text)) list.push(text)
+    howByEdge.set(key, list)
+  }
+  // Regional forms PokeAPI gives no rows for evolve into the same region's form.
+  dex.forEach((e, i) => {
+    if (!isRegional(e) || ev[i]!.length) return
+    dex.forEach((c, j) => {
+      if (parentOf(c.sp) !== e.sp || suffixOf(c) !== suffixOf(e)) return
+      ev[i]!.push(j)
+      if (!parentIdx.has(j)) parentIdx.set(j, i)
+      howByEdge.set(`${i}>${j}`, howByEdge.get(`${baseIndexBySpecies.get(e.sp)}>${baseIndexBySpecies.get(c.sp)}`) ?? [])
+    })
+  })
+  for (const list of ev) list.sort((a, b) => a - b)
+  const howToEvolve = (from: number, to: number): string =>
+    (howByEdge.get(`${from}>${to}`) ?? []).join(', or ') || 'special conditions'
+
+  // Where to catch each entry from: the easiest earlier stage, the earliest
+  // on ties since final stages are rarely found in the wild.
+  const captureRate = (sp: number): number => Number(speciesById.get(sp)?.capture_rate) || 0
+  const catchFrom: number[] = dex.map((e, i) => {
+    let best = i
+    let bestRate = captureRate(e.sp)
+    const seen = new Set([i])
+    for (let at = parentIdx.get(i); at !== undefined && !seen.has(at); at = parentIdx.get(at)) {
+      seen.add(at)
+      const rate = captureRate(dex[at]!.sp)
+      // Baby stages come from eggs, so only point at one when it is strictly easier.
+      const baby = speciesById.get(dex[at]!.sp)?.is_baby === '1'
+      if (baby ? rate > bestRate : rate >= bestRate) { best = at; bestRate = rate }
+    }
+    return best
+  })
+
+  const rareChains = new Set<string>()
+  for (const r of csv.pokemon_species) {
+    if (r.is_legendary === '1' || r.is_mythical === '1' || SPECIAL_ENCOUNTERS.has(Number(r.id))) {
+      rareChains.add(r.evolution_chain_id!)
+    }
+  }
+  const chainOf = (sp: number): number => Number(speciesById.get(sp)?.evolution_chain_id) || 0
+  const obtainable = (e: Entry, i: number): boolean =>
+    (e.id <= 1025 || isRegional(e)) &&
+    !rareChains.has(String(chainOf(e.sp))) &&
+    captureRate(dex[catchFrom[i]!]!.sp) >= MIN_CAPTURE_RATE
+
+  // Learners of each catch-helper move, by dex index, forms inheriting as above.
+  const catchMoves: Record<string, number[]> = {}
+  for (const slug of CATCH_MOVES) {
+    const row = csv.moves.find((m) => m.identifier === slug)
+    if (!row) throw new Error(`missing move ${slug}`)
+    const learners = new Set<number>()
+    for (const r of csv.pokemon_moves) if (r.move_id === row.id) learners.add(Number(r.pokemon_id))
+    const name = enMoveName.get(row.id!) ?? titleCase(slug)
+    catchMoves[name] = dex
+      .map((e, i) => ({ e, i }))
+      .filter(({ e }) =>
+        learners.has(e.id) ||
+        (!learnByPokemon.get(e.id)?.size && learners.has(baseIdBySpecies.get(e.sp) ?? -1)))
+      .map(({ i }) => i)
+  }
+
   // --- natures -------------------------------------------------------------
 
   const enNatureName = new Map<string, string>()
@@ -382,7 +546,14 @@ async function main(): Promise<void> {
 
   const outputs: Record<string, unknown> = {
     'typechart.json': { types: typeNames, matrix },
-    'dex.json': dex.map(({ n, t, s, ab, hab }) => ({ n, t, s, ab, hab })),
+    'dex.json': dex.map((e, i) => ({
+      n: e.n, t: e.t, s: e.s, ab: e.ab, hab: e.hab,
+      cr: captureRate(e.sp),
+      fm: chainOf(e.sp),
+      ...(ev[i]!.length ? { ev: ev[i], eh: ev[i]!.map((c) => howToEvolve(i, c)) } : {}),
+      ...(obtainable(e, i) ? { ok: 1, cf: catchFrom[i] } : {}),
+    })),
+    'catch.json': catchMoves,
     'moves.json': moves,
     'learnsets.json': learnsets,
     'natures.json': natures,

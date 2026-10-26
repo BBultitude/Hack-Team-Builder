@@ -3,15 +3,24 @@ import type { GameData, RosterEntry } from '../types'
 import { buildLookup } from '../logic/lookup'
 import { EMPTY_STATE, type RankScope, load, save } from '../logic/storage'
 import { loadGameData } from '../data/load'
+import { PokedexTab, addToRoster } from './PokedexTab'
 import { TeamTab } from './TeamTab'
+import { LookForTab } from './LookForTab'
 import { OpponentTab } from './OpponentTab'
 
-type Tab = 'team' | 'opponent'
+type Tab = 'dex' | 'team' | 'look' | 'opponent'
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'dex', label: 'Pokédex' },
+  { id: 'team', label: 'Best Team' },
+  { id: 'look', label: 'Look For' },
+  { id: 'opponent', label: 'Opponent' },
+]
 
 export function App() {
   const [data, setData] = useState<GameData | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<Tab>('team')
+  const [tab, setTab] = useState<Tab>('dex')
   const [openIndex, setOpenIndex] = useState<number | null>(null)
 
   const [roster, setRoster] = useState<RosterEntry[]>(EMPTY_STATE.roster)
@@ -63,17 +72,16 @@ export function App() {
       </header>
 
       <nav class="tabs" role="tablist">
-        <button role="tab" aria-selected={tab === 'team'} onClick={() => setTab('team')}>
-          Team
-        </button>
-        <button role="tab" aria-selected={tab === 'opponent'} onClick={() => setTab('opponent')}>
-          Opponent
-        </button>
+        {TABS.map((t) => (
+          <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>
+            {t.label}
+          </button>
+        ))}
       </nav>
 
       <main>
-        {tab === 'team' ? (
-          <TeamTab
+        {tab === 'dex' && (
+          <PokedexTab
             data={data}
             lookup={lookup}
             roster={roster}
@@ -83,7 +91,25 @@ export function App() {
             onRoster={setRoster}
             onTeam={setTeam}
           />
-        ) : (
+        )}
+        {tab === 'team' && (
+          <TeamTab data={data} lookup={lookup} roster={roster} team={team} onTeam={setTeam} />
+        )}
+        {tab === 'look' && (
+          <LookForTab
+            data={data}
+            lookup={lookup}
+            roster={roster}
+            team={team}
+            onCaught={(name) => {
+              const next = addToRoster(data, lookup, roster, team, name)
+              if (!next) return
+              setRoster(next.roster)
+              setTeam(next.team)
+            }}
+          />
+        )}
+        {tab === 'opponent' && (
           <OpponentTab
             data={data}
             lookup={lookup}

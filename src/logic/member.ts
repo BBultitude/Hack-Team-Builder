@@ -76,3 +76,43 @@ export function effectiveSpeed(member: Member): number {
 export function hasStab(member: Member, moveType: number): boolean {
   return member.types.includes(moveType)
 }
+
+/** A fresh roster entry for a dex species, or a custom one when dexIndex is undefined. */
+export function entryFromDex(data: GameData, name: string, dexIndex: number | undefined): RosterEntry {
+  const vanilla = dexIndex === undefined ? undefined : data.dex[dexIndex]
+  return {
+    n: vanilla?.n ?? name,
+    a: vanilla?.t[0] ?? 0,
+    b: vanilla?.t[1] ?? -1,
+    ab: vanilla?.ab[0] ?? '',
+    nt: Math.max(data.natures.findIndex((n) => n.up === null), 0),
+    mv: ['', '', '', ''],
+    st: null,
+    d: dexIndex ?? -1,
+  }
+}
+
+/**
+ * The same Pokemon after evolving: nature and moves carry over, the ability
+ * too when the evolution can have it. Stat overrides described the old form,
+ * so they are dropped.
+ */
+export function evolve(data: GameData, entry: RosterEntry, target: number): RosterEntry {
+  const next = entryFromDex(data, '', target)
+  const dex = data.dex[target]
+  const keepsAbility = !!dex && [...dex.ab, ...dex.hab].includes(entry.ab)
+  return { ...next, nt: entry.nt, mv: [...entry.mv], ab: keepsAbility ? entry.ab : next.ab }
+}
+
+/** Dex indices from one stage to a later one, both ends included; [to] when unrelated. */
+export function evolutionPath(data: GameData, from: number, to: number): number[] {
+  const walk = (at: number): number[] | null => {
+    if (at === to) return [at]
+    for (const next of data.dex[at]?.ev ?? []) {
+      const rest = walk(next)
+      if (rest) return [at, ...rest]
+    }
+    return null
+  }
+  return walk(from) ?? [to]
+}

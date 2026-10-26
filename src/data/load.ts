@@ -3,6 +3,7 @@ import dexUrl from '../../data/dex.json?url'
 import movesUrl from '../../data/moves.json?url'
 import learnsetsUrl from '../../data/learnsets.json?url'
 import naturesUrl from '../../data/natures.json?url'
+import catchUrl from '../../data/catch.json?url'
 import type { GameData } from '../types'
 
 /**
@@ -16,12 +17,13 @@ async function json<T>(url: string): Promise<T> {
 }
 
 export async function loadGameData(): Promise<GameData> {
-  const [chart, dex, moves, learnsets, natures] = await Promise.all([
+  const [chart, dex, moves, learnsets, natures, catchMoves] = await Promise.all([
     json<GameData['chart']>(chartUrl),
     json<GameData['dex']>(dexUrl),
     json<GameData['moves']>(movesUrl),
     json<GameData['learnsets']>(learnsetsUrl),
     json<GameData['natures']>(naturesUrl),
+    json<GameData['catchMoves']>(catchUrl),
   ])
-  return { chart, dex, moves, learnsets, natures }
+  return { chart, dex, moves, learnsets, natures, catchMoves }
 }

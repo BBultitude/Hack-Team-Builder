@@ -41,7 +41,10 @@ Also persisted: team (indices, max 6), opponent {name, ability}, rank scope ("te
 - Per member and type multiplier x: x ≥ 3 → weak +2, score −2; x > 1 → weak +1, −1; x = 0 → resist +1, +1.5; x ≤ 0.5 → resist +1, +1. If 3+ weaknesses and weak > resist: −2.
 - Offensive coverage: count of 18 types hit super-effectively by any attack option. Options are the entered moves' types, or own types (STAB) if none entered.
 - Team score = defensive + 1.5 × coverage.
-- Also shown: exposed types, uncovered types, physical/special balance, suggested next additions (score gain), "learnable fixes" (best learnable move per uncovered type, by power with STAB ×1.5), warning if abilities unset.
+- Also shown: exposed types, uncovered types, physical/special balance, suggested next additions (score gain), warning if abilities unset.
+- Recommended moves (advice only): four learnable moves per member, greedy on power × STAB 1.5 × role fit (0.6 off-role) + 40 per type newly hit super-effectively; members share one coverage set so they complement each other. Self-KO, recharge and charge-up moves excluded.
+**Evolve:** each Pokémon shows its vanilla evolution method(s); "Evolve → X" swaps species in place, keeping nature, moves, team slot, and ability when the evolution can have it.
+**Look For tab:** realistically catchable species (no legendaries, mythicals, Ultra Beasts, Paradox Pokémon, Megas, or lines whose best capture rate is under 30) from families not owned, ranked by team-score gain (current team, or auto-built six), one per family. Names the stage to search for and the evolution line to it. Catch plan: Quick Ball turn 1; a roster member with False Swipe; sleep (×2.5) or paralysis (×1.5) move, respecting type and ability immunities; best ball (Net, Fast, Dusk, Timer, Dream, Ultra) with Gen 3–4 per-throw odds as an estimate.
 **Auto-build:** if roster ≤ 6 take all; else greedy add by best marginal score, then swap hill-climb until no improvement.
 **Opponent tab:** pick opponent from dex and optional ability. Rank the current team (or all owned).
 - Offence value = best of (multiplier × 1.5 if STAB) across the member's attack options, with the opponent's ability applied.
@@ -53,7 +56,8 @@ Also persisted: team (indices, max 6), opponent {name, ability}, rank scope ("te
 
 ## 6. UI requirements
 - Mobile-first, light and dark themes, safe-area padding.
-- Two tabs: Team and Opponent.
+- Four tabs: Pokédex (roster and editing), Best Team (analysis and moves), Look For, Opponent.
+- Editor: ability and nature up front; types, moves and base stats under a collapsed "Hack changes" section; Remove needs a second tap.
 - Custom suggestion list (not native datalist, which covers the keyboard): up to 6 buttons directly under the input, prefix matches first, selection on pointerdown, input scrolled towards the top on focus, extra bottom padding so the page can scroll.
 - Collapsible per-Pokémon editor; warnings in red.
 

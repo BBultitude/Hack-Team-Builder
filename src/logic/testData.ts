@@ -15,6 +15,7 @@ export const data: GameData = {
   moves: read('moves.json'),
   learnsets: read('learnsets.json'),
   natures: read('natures.json'),
+  catchMoves: read('catch.json'),
 }
 
 export const lookup: Lookup = buildLookup(data)

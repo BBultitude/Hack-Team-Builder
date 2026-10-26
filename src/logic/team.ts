@@ -1,6 +1,6 @@
 import type { GameData, Move, RosterEntry } from '../types'
 import type { Lookup } from './lookup'
-import { type Member, hasStab, incomingMultiplier, resolveMember } from './member'
+import { type Member, entryFromDex, hasStab, incomingMultiplier, resolveMember } from './member'
 import { effectiveness } from './typeChart'
 
 export const MAX_TEAM = 6
@@ -150,48 +150,132 @@ export function suggestAdditions(
   return out.slice(0, limit)
 }
 
-export interface LearnableFix {
-  /** Type that is currently uncovered. */
-  type: number
-  /** Index into the team array, not the roster. */
-  memberSlot: number
-  memberName: string
+/** Damaging moves a planner should never recommend: self-KO, recharge, charge-up or unreliable. */
+const AVOID_MOVES = new Set([
+  'Explosion', 'Self-Destruct', 'Misty Explosion', 'Hyper Beam', 'Giga Impact', 'Blast Burn',
+  'Hydro Cannon', 'Frenzy Plant', 'Rock Wrecker', 'Roar of Time', 'Prismatic Laser', 'Eternabeam',
+  'Meteor Assault', 'Dream Eater', 'Focus Punch', 'Sky Attack', 'Skull Bash', 'Razor Wind',
+  'Belch', 'Synchronoise', 'Last Resort', 'Steel Beam', 'Mind Blown', 'Chloroblast',
+  'Zap Cannon', 'Dynamic Punch', 'Inferno', 'Future Sight', 'Doom Desire', 'Solar Beam', 'Solar Blade',
+])
+
+/** Value of hitting one more type super-effectively, in base-power points. */
+const NEW_COVERAGE_VALUE = 40
+/** Damage-class mismatch with the member's role, e.g. a special move on a physical attacker. */
+const OFF_ROLE_FACTOR = 0.6
+
+export interface RecommendedMove {
   move: Move
   stab: boolean
-  /** Base power with the Same-Type Attack Bonus folded in; used for ranking. */
-  rating: number
+  /** Types this move newly brings into the team's super-effective coverage. */
+  covers: number[]
 }
 
 /**
- * For each uncovered type, the best move any team member could learn that
- * would cover it. Ranked by base power, with Same-Type Attack Bonus applied.
+ * Four learnable moves per member, picked greedily for power (Same-Type
+ * Attack Bonus and role fit applied) plus types the team does not yet hit.
+ * Members are filled in team order and share one coverage set, so later
+ * members complement earlier ones. Null for custom Pokemon (no learnset).
  */
-export function learnableFixes(
-  data: GameData,
-  members: readonly Member[],
-  uncovered: readonly number[],
-): LearnableFix[] {
-  const out: LearnableFix[] = []
-
-  for (const t of uncovered) {
-    let best: LearnableFix | null = null
-    members.forEach((m, slot) => {
-      if (m.entry.d < 0) return // custom Pokemon have no vanilla learnset
-      for (const mi of data.learnsets[m.entry.d] ?? []) {
-        const move = data.moves[mi]
-        if (!move || move.p <= 0) continue
-        if ((data.chart.matrix[move.t]?.[t] ?? 1) <= 1) continue
-        const stab = hasStab(m, move.t)
-        const rating = move.p * (stab ? 1.5 : 1)
-        if (!best || rating > best.rating) {
-          best = { type: t, memberSlot: slot, memberName: m.entry.n, move, stab, rating }
-        }
-      }
-    })
-    if (best) out.push(best)
+export function recommendMoves(data: GameData, members: readonly Member[]): (RecommendedMove[] | null)[] {
+  const typeCount = data.chart.types.length
+  const covered = new Set<number>()
+  const hits = (move: Move): number[] => {
+    const out: number[] = []
+    for (let t = 0; t < typeCount; t++) if ((data.chart.matrix[move.t]?.[t] ?? 1) > 1) out.push(t)
+    return out
   }
 
-  return out
+  return members.map((m) => {
+    if (m.entry.d < 0) return null
+    const candidates = (data.learnsets[m.entry.d] ?? [])
+      .map((i) => data.moves[i])
+      .filter((mv): mv is Move => !!mv && mv.p > 0 && !AVOID_MOVES.has(mv.n))
+
+    const picked: RecommendedMove[] = []
+    while (picked.length < 4) {
+      let best: { rec: RecommendedMove; value: number } | null = null
+      for (const move of candidates) {
+        if (picked.some((p) => p.move.t === move.t)) continue
+        const stab = hasStab(m, move.t)
+        const fits = m.role === 'Mixed' || m.role.toLowerCase() === move.c
+        const covers = hits(move).filter((t) => !covered.has(t))
+        const value =
+          move.p * (stab ? 1.5 : 1) * (fits ? 1 : OFF_ROLE_FACTOR) + NEW_COVERAGE_VALUE * covers.length
+        if (!best || value > best.value) best = { rec: { move, stab, covers }, value }
+      }
+      if (!best) break
+      picked.push(best.rec)
+      for (const t of best.rec.covers) covered.add(t)
+    }
+    return picked
+  })
+}
+
+export interface LookForTarget {
+  /** Dex index of the Pokemon to aim for. */
+  index: number
+  /** Dex index to actually catch: this one, or an easier earlier stage. */
+  catchFrom: number
+  gain: number
+  /** Currently exposed types it would cover defensively. */
+  resists: number[]
+  /** Currently uncovered types it would hit super-effectively. */
+  hits: number[]
+}
+
+/**
+ * Realistically catchable species, from families not already owned, ranked
+ * by how much they would improve the team (the current one, or the roster's
+ * auto-built best six). One per family; ties prefer higher base stats.
+ */
+export function lookFor(
+  data: GameData,
+  lookup: Lookup,
+  roster: readonly RosterEntry[],
+  team: readonly number[],
+  limit = 15,
+): LookForTarget[] {
+  const baseIdx = team.length ? team : autoBuild(data, lookup, roster)
+  const base = baseIdx
+    .map((i) => roster[i])
+    .filter((e): e is RosterEntry => e !== undefined)
+    .map((e) => resolveMember(data, lookup, e))
+  const baseAnalysis = analyseTeam(data, base)
+  const owned = new Set(roster.map((e) => data.dex[e.d]?.fm).filter((f) => f !== undefined))
+  const bst = (i: number): number => (data.dex[i]?.s ?? []).reduce((a, b) => a + b, 0)
+
+  const out: LookForTarget[] = []
+  data.dex.forEach((d, i) => {
+    // Base 1 Hit Points (Shedinja) makes the type score meaningless.
+    if (!d.ok || owned.has(d.fm) || d.s[0] === 1) return
+    const m = resolveMember(data, lookup, entryFromDex(data, d.n, i))
+    const trials = base.length < MAX_TEAM ? [[...base, m]] : base.map((_, s) => base.map((b, j) => (j === s ? m : b)))
+    let best: TeamAnalysis | null = null
+    for (const trial of trials) {
+      const a = analyseTeam(data, trial)
+      if (!best || a.score > best.score) best = a
+    }
+    if (!best) return
+    const gain = best.score - baseAnalysis.score
+    if (gain <= 0) return
+    out.push({
+      index: i,
+      catchFrom: d.cf ?? i,
+      gain,
+      resists: baseAnalysis.exposed.filter((t) => !best.exposed.includes(t)),
+      hits: baseAnalysis.uncovered.filter((t) => best.covered.includes(t)),
+    })
+  })
+
+  out.sort((a, b) => b.gain - a.gain || bst(b.index) - bst(a.index) || a.index - b.index)
+  const seen = new Set<number>()
+  return out.filter((t) => {
+    const fm = data.dex[t.index]!.fm
+    if (seen.has(fm)) return false
+    seen.add(fm)
+    return true
+  }).slice(0, limit)
 }
 
 /**
