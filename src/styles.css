@@ -1,0 +1,414 @@
+/* Mobile-first. Light and dark follow the device; no in-app toggle. */
+
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #eef0f4;
+  --text: #16181d;
+  --muted: #5d6572;
+  --border: #d8dce3;
+  --accent: #2f6fd0;
+  --accent-text: #ffffff;
+  --danger: #b4232c;
+  --good: #1d7a4c;
+  --radius: 10px;
+  --tap: 44px;
+
+  /*
+   * Defensive matrix: a diverging ramp, red (weak) through a blank neutral
+   * to blue (resists). Validated for colour-vision separation against this
+   * app's own surfaces, not picked by eye. x1 deliberately has no fill —
+   * two thirds of cells are neutral, and tinting them buries the rest.
+   */
+  --cell-x4: #a81f1a;
+  --cell-x4-ink: #ffffff;
+  --cell-x2: #e36050;
+  --cell-x2-ink: #16181d;
+  --cell-half: #6aa8e6;
+  --cell-half-ink: #16181d;
+  --cell-quarter: #17539f;
+  --cell-quarter-ink: #ffffff;
+  --cell-zero: #17539f;
+  --cell-zero-ink: #ffffff;
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a;
+    --surface: #1d2026;
+    --surface-2: #272b33;
+    --text: #e8eaee;
+    --muted: #9aa3b2;
+    --border: #353a44;
+    --accent: #5a9bf0;
+    --accent-text: #0d1117;
+    --danger: #ff7b7b;
+    --good: #5fd39b;
+
+    /*
+     * Stepped for the dark surface. Severity tracks chroma, not lightness:
+     * a dark-but-saturated red has too little contrast here, but making the
+     * worst case the *palest* cell inverts the universal read of "deeper red
+     * means more danger" and makes 4x look milder than 2x.
+     */
+    --cell-x4: #f05540;
+    --cell-x4-ink: #16181d;
+    --cell-x2: #a04a40;
+    --cell-x2-ink: #ffffff;
+    --cell-half: #3d6f9f;
+    --cell-half-ink: #ffffff;
+    --cell-quarter: #52a0ea;
+    --cell-quarter-ink: #16181d;
+    --cell-zero: #52a0ea;
+    --cell-zero-ink: #16181d;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+#app {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+
+h1 { font-size: 1.25rem; margin: 0; }
+h2 { font-size: 1rem; margin: 0 0 0.5rem; }
+h3 { font-size: 0.9rem; margin: 0; }
+p { margin: 0 0 0.5rem; }
+
+button, input, select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  min-height: var(--tap);
+  padding: 0 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+}
+button:active { background: var(--surface-2); }
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+button.link {
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  text-decoration: underline;
+}
+button.icon {
+  min-width: var(--tap);
+  padding: 0;
+}
+
+input, select {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+input[type="number"] { padding-right: 0.2rem; }
+
+/* ------------------------------------------------------------- app chrome */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.6rem 0.9rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.6rem 0.9rem;
+  background: var(--bg);
+  position: sticky;
+  top: 3.1rem;
+  z-index: 4;
+}
+.tabs button { flex: 1; }
+.tabs button[aria-selected="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+main {
+  padding: 0 0.9rem;
+  padding-bottom: calc(2rem + env(safe-area-inset-bottom));
+}
+
+/*
+ * Room to scroll a suggestion list clear of the on-screen keyboard, added
+ * only while one is open so the page is not permanently padded by a
+ * screenful of nothing.
+ */
+body.suggest-open main {
+  padding-bottom: calc(60vh + env(safe-area-inset-bottom));
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.row { display: flex; align-items: center; gap: 0.5rem; }
+.row.wrap { flex-wrap: wrap; }
+.grow { flex: 1; min-width: 0; }
+.muted { color: var(--muted); font-size: 0.85rem; }
+.danger { color: var(--danger); }
+.good { color: var(--good); }
+.stack > * + * { margin-top: 0.6rem; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 2rem 1rem;
+}
+
+/* -------------------------------------------------------- suggestion list */
+
+.suggest { position: relative; }
+.suggest-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.suggest-list button {
+  min-height: var(--tap);
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+  text-align: left;
+}
+
+/* ------------------------------------------------------------ type tokens */
+
+.type {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+.type.weak { border-color: var(--danger); color: var(--danger); }
+.type.resist { border-color: var(--good); color: var(--good); }
+
+/* ------------------------------------------------------------------ table */
+
+/* ----------------------------------------------------- defensive matrix */
+
+.matrix-key {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.2rem 0.6rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+}
+.matrix-key > li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.matrix-key span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.matrix {
+  width: 100%;
+  border-collapse: separate;
+  /* The 2px gutter is what makes the cells read as discrete tiles. */
+  border-spacing: 2px;
+  table-layout: fixed;
+  font-size: 0.8rem;
+}
+.matrix th {
+  font-weight: 400;
+  text-align: left;
+}
+.matrix thead th {
+  padding: 0 0 0.2rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.matrix .corner { width: 4.1rem; }
+.matrix tbody th {
+  padding-right: 0.3rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.matrix td {
+  height: 1.7rem;
+  padding: 0;
+  border-radius: 4px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  /* Neutral: no fill at all. The surface is the midpoint of the ramp. */
+  background: transparent;
+  color: transparent;
+}
+.matrix td.x4   { background: var(--cell-x4);      color: var(--cell-x4-ink); }
+.matrix td.x2   { background: var(--cell-x2);      color: var(--cell-x2-ink); }
+.matrix td.half { background: var(--cell-half);    color: var(--cell-half-ink); }
+.matrix td.qtr  { background: var(--cell-quarter); color: var(--cell-quarter-ink); }
+.matrix td.zero {
+  background: var(--cell-zero);
+  color: var(--cell-zero-ink);
+  /* Immunity is off the scale, not simply a stronger resistance. */
+  box-shadow: inset 0 0 0 2px var(--surface);
+}
+
+.matrix-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.7rem;
+  margin: 0.75rem 0 0;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.matrix-legend > li { display: flex; align-items: center; gap: 0.3rem; }
+.matrix-legend i {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 3px;
+  font-style: normal;
+}
+.matrix-legend i.neutral { border: 1px dashed var(--border); }
+
+.matrix-readout {
+  min-height: 2.4em;
+  margin: 0.6rem 0 0;
+}
+
+.bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.bar > span { display: block; height: 100%; background: var(--accent); }
+
+/* ----------------------------------------------------------------- editor */
+
+.editor-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+.editor-body { margin-top: 0.75rem; }
+
+.field { display: block; }
+.field > span {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 0.2rem;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.chip-row { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+
+.member-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+.rank-badge {
+  flex: none;
+  width: 1.6rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.matrix-legend i.lg-x4   { background: var(--cell-x4); }
+.matrix-legend i.lg-x2   { background: var(--cell-x2); }
+.matrix-legend i.lg-half { background: var(--cell-half); }
+.matrix-legend i.lg-qtr  { background: var(--cell-quarter); }
+.matrix-legend i.lg-zero {
+  background: var(--cell-zero);
+  box-shadow: inset 0 0 0 2px var(--surface);
+}

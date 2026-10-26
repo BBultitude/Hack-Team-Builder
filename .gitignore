@@ -1,0 +1,6 @@
+node_modules/
+dist/
+scripts/.cache/
+
+# Scratch scripts from the build session; safe to delete.
+ptb-*
