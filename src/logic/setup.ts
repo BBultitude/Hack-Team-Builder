@@ -1,5 +1,7 @@
 import type { DexEntry, GameData, HackPack, Move, RosterEntry } from '../types'
+import type { Lookup } from './lookup'
 import { evolutionPath } from './member'
+import { UNCATCHABLE_FORM } from './checklist'
 
 /**
  * A game setup is capped at "Pokemon up to and including Generation N", and
@@ -200,3 +202,39 @@ export const dexNames = (data: GameData): string[] =>
 /** Move names that exist in this setup, for the move picker. */
 export const moveNames = (data: GameData): string[] =>
   data.moves.filter((m) => m.g <= (data.gen ?? MAX_GEN)).map((m) => m.n)
+
+/** The run Pokédex in play: the saved choice, else the hack's first (its default). */
+export const runVariant = (pack: HackPack | null, id: string): NonNullable<HackPack['variants']>[number] | undefined =>
+  pack?.variants?.find((v) => v.id === id) ?? pack?.variants?.[0]
+
+/**
+ * Emerald Rogue's run rules as a species test, or undefined for games without
+ * them. Like Rogue: a species can turn up when it, its base form or an earlier
+ * stage is in the run's Pokédex and its generation is within the cap; never a
+ * legendary (those only come from legendary rooms) or a battle-only form.
+ */
+export function runFilter(
+  data: GameData,
+  lookup: Lookup,
+  pack: HackPack | null,
+  id: string,
+): ((dexIndex: number) => boolean) | undefined {
+  const variant = runVariant(pack, id)
+  if (!variant) return undefined
+  const index = (name: string): number | undefined => lookup.dexByName.get(name.toLowerCase())
+  const baseOf = (i: number): number => index(data.dex[i]!.n.replace(/ \(.*\)$/, '')) ?? i
+  const listed = new Set(variant.species.map(index).filter((i): i is number => i !== undefined))
+  const legendary = new Set((pack?.legendary ?? []).map((n) => data.dex[index(n) ?? -1]?.fm))
+  const families = new Map<number, number[]>()
+  data.dex.forEach((d, i) => families.set(d.fm, [...(families.get(d.fm) ?? []), i]))
+
+  return (i) => {
+    const d = data.dex[i]
+    if (!d || d.g > variant.gen || legendary.has(d.fm) || UNCATCHABLE_FORM.test(d.n)) return false
+    return (families.get(d.fm) ?? [i]).some((x) => {
+      if (!listed.has(x) && !listed.has(baseOf(x))) return false
+      const path = evolutionPath(data, x, i)
+      return path[0] === x && path[path.length - 1] === i
+    })
+  }
+}

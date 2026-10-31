@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type { GameData, HackPack, RosterEntry } from '../types'
 import { buildLookup } from '../logic/lookup'
+import { MAX_TEAM } from '../logic/team'
 import {
   EMPTY_STATE,
   type Hack,
@@ -18,7 +19,7 @@ import {
   saveSetups,
   serialiseState,
 } from '../logic/storage'
-import { adaptRoster, forSetup, withHack } from '../logic/setup'
+import { adaptRoster, forSetup, runFilter, withHack } from '../logic/setup'
 import { type SyncStatus, mergeIndex, setAccessCode, statusFor, syncSetups } from '../logic/sync'
 import { SetupPanel } from './SetupPanel'
 import { PartyBar } from './PartyBar'
@@ -28,16 +29,17 @@ import { TeamTab } from './TeamTab'
 import { LookForTab } from './LookForTab'
 import { OpponentTab } from './OpponentTab'
 import { PokemonModal } from './PokemonModal'
+import { OverworldTab, ReplacePicker, addToParty } from './OverworldTab'
 
 type Tab = 'dex' | 'team' | 'look' | 'opponent'
 
 /** Unbound's middle trainer difficulty, used until the player picks one. */
 const DEFAULT_DIFFICULTY = 'expert'
 
-const TABS: { id: Tab; label: string }[] = [
+const TABS: { id: Tab; label: string; party?: string }[] = [
   { id: 'dex', label: 'Pokédex' },
-  { id: 'team', label: 'Best Team' },
-  { id: 'look', label: 'Look For' },
+  { id: 'team', label: 'Best Team', party: 'Party' },
+  { id: 'look', label: 'Look For', party: 'Capture Next' },
   { id: 'opponent', label: 'Opponent' },
 ]
 
@@ -55,6 +57,12 @@ export function App() {
   const [team, setTeam] = useState<number[]>(EMPTY_STATE.team)
   const [opponent, setOpponent] = useState(EMPTY_STATE.opponent)
   const [scope, setScope] = useState<RankScope>(EMPTY_STATE.scope)
+  const [level, setLevel] = useState(EMPTY_STATE.level)
+  const [overworld, setOverworld] = useState(EMPTY_STATE.overworld)
+  const [daycare, setDaycare] = useState(EMPTY_STATE.daycare)
+  const [runDex, setRunDex] = useState(EMPTY_STATE.runDex)
+  /** Emerald Rogue: a Pokémon waiting for a full party to make room. */
+  const [incoming, setIncoming] = useState<string | null>(null)
   const [restored, setRestored] = useState(false)
   /** Roster index of the Pokemon currently out against the opponent. */
   const [outIndex, setOutIndex] = useState<number | null>(null)
@@ -84,6 +92,13 @@ export function App() {
   const difficulty =
     difficulties.find((d) => d.id === active.difficulty) ?? difficulties.find((d) => d.id === DEFAULT_DIFFICULTY) ?? difficulties[0]
   const trainers = difficulty ? (pack?.trainers?.[difficulty.sets] ?? []) : []
+  /** Emerald Rogue has no boxes: everything owned is the run's party. */
+  const partyOnly = active.hack === 'rogue'
+  const party = useMemo(() => (partyOnly ? roster.map((_, i) => i) : team), [partyOnly, roster, team])
+  const allow = useMemo(
+    () => (partyOnly && data && lookup ? runFilter(data, lookup, pack, runDex) : undefined),
+    [partyOnly, data, lookup, pack, runDex],
+  )
 
   /** Publishes the sticky header's height as --head, so the party bar pins just below it. */
   const observeHead = useMemo(() => {
@@ -131,6 +146,11 @@ export function App() {
     setTeam(saved.team)
     setOpponent(saved.opponent)
     setScope(saved.scope)
+    setLevel(saved.level)
+    setOverworld(saved.overworld)
+    setDaycare(saved.daycare)
+    setRunDex(saved.runDex)
+    setIncoming(null)
     setOpenIndex(null)
     setOutIndex(null)
     setRestored(true)
@@ -140,13 +160,13 @@ export function App() {
     // Only persist once the saved state has been restored, so the first
     // render never writes an empty roster over a real one.
     if (!restored) return
-    const state = { roster, team, opponent, scope }
+    const state = { roster, team, opponent, scope, level, overworld, daycare, runDex }
     const json = JSON.stringify(serialiseState(state))
     if (json === lastSaved.current) return
     lastSaved.current = json
     save(active.id, state)
     patchActive({})
-  }, [restored, roster, team, opponent, scope])
+  }, [restored, roster, team, opponent, scope, level, overworld, daycare, runDex])
 
   const stampOf = (index: SetupIndex): number => Math.max(...index.list.map((s) => s.updatedAt))
 
@@ -239,11 +259,25 @@ export function App() {
       const next = hack ? await loadHack(hack) : null
       const gen = next?.gen ?? active.gen
       if (hack && next) setPacked({ hack, pack: next })
+      // Rogue never kept a team (the whole roster was the party), so carry the party over as one.
+      if (active.hack === 'rogue') setTeam(roster.map((_, i) => i).slice(0, MAX_TEAM))
       setRoster(adaptRoster(data, forSetup(withHack(vanilla, next), gen), roster))
       patchActive({ hack, gen })
     } catch (e) {
       setError((e as Error).message)
     }
+  }
+
+  /** Emerald Rogue: adds to the party, or asks who to replace when it is full. */
+  const join = (name: string, replace?: number): void => {
+    if (!data || !lookup) return
+    const next = addToParty(data, lookup, roster, name, replace)
+    if (!next) {
+      setIncoming(name)
+      return
+    }
+    setIncoming(null)
+    setRoster(next)
   }
 
   const syncLabel =
@@ -309,7 +343,8 @@ export function App() {
             data={data}
             lookup={lookup}
             roster={roster}
-            team={team}
+            team={party}
+            level={level}
             opponent={tab === 'opponent' ? opponent : null}
             out={outIndex}
             onPick={(i) => {
@@ -318,6 +353,10 @@ export function App() {
             }}
             onEmpty={() => setTab('dex')}
           />
+
+          {incoming && (
+            <ReplacePicker data={data} party={roster} name={incoming} onPick={(slot) => join(incoming, slot)} onCancel={() => setIncoming(null)} />
+          )}
 
           {sync === 'locked' && (
             <form
@@ -357,7 +396,29 @@ export function App() {
                 onDelete={deleteActive}
               />
             )}
-            {tab === 'dex' && (
+            {tab === 'dex' && partyOnly && (
+              <OverworldTab
+                data={data}
+                lookup={lookup}
+                roster={roster}
+                overworld={overworld}
+                daycare={daycare}
+                pack={pack}
+                runDex={runDex}
+                onJoin={join}
+                onOverworld={setOverworld}
+                onDaycare={setDaycare}
+                onRunDex={setRunDex}
+                onNewRun={() => {
+                  setRoster([])
+                  setTeam([])
+                  setOpponent(null)
+                  setOutIndex(null)
+                  setIncoming(null)
+                }}
+              />
+            )}
+            {tab === 'dex' && !partyOnly && (
               <PokedexTab
                 data={data}
                 lookup={lookup}
@@ -370,15 +431,25 @@ export function App() {
               />
             )}
             {tab === 'team' && (
-              <TeamTab data={data} lookup={lookup} roster={roster} team={team} onTeam={setTeam} onOpen={setOpenIndex} />
+              <TeamTab
+                data={data}
+                lookup={lookup}
+                roster={roster}
+                team={party}
+                partyOnly={partyOnly}
+                onTeam={setTeam}
+                onOpen={setOpenIndex}
+              />
             )}
             {tab === 'look' && (
               <LookForTab
                 data={data}
                 lookup={lookup}
                 roster={roster}
-                team={team}
+                team={party}
+                allow={allow}
                 onCaught={(name) => {
+                  if (partyOnly) return join(name)
                   const next = addToRoster(data, lookup, roster, team, name)
                   if (!next) return
                   setRoster(next.roster)
@@ -391,7 +462,9 @@ export function App() {
                 data={data}
                 lookup={lookup}
                 roster={roster}
-                team={team}
+                team={party}
+                level={level}
+                onLevel={setLevel}
                 opponent={opponent}
                 scope={scope}
                 out={outIndex}
@@ -417,7 +490,8 @@ export function App() {
         data={data}
         lookup={lookup}
         roster={roster}
-        team={team}
+        team={party}
+        party={partyOnly}
         index={openIndex}
         onClose={() => setOpenIndex(null)}
         onRoster={setRoster}
@@ -427,7 +501,7 @@ export function App() {
       <nav class="tabs" role="tablist" aria-label="Sections">
         {TABS.map((t) => (
           <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>
-            {t.label}
+            {(partyOnly && t.party) || t.label}
           </button>
         ))}
       </nav>

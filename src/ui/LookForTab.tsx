@@ -12,6 +12,8 @@ interface Props {
   lookup: Lookup
   roster: RosterEntry[]
   team: number[]
+  /** Emerald Rogue's run rules: only what they allow, every one ball-catchable. */
+  allow?: (dexIndex: number) => boolean
   /** Adds the caught Pokemon by name. */
   onCaught: (name: string) => void
 }
@@ -20,8 +22,8 @@ export function LookForTab(props: Props) {
   const { data, lookup, roster, team } = props
 
   const targets = useMemo(
-    () => (roster.length ? lookFor(data, lookup, roster, team) : []),
-    [data, lookup, roster, team],
+    () => (roster.length ? lookFor(data, lookup, roster, team, undefined, props.allow) : []),
+    [data, lookup, roster, team, props.allow],
   )
 
   const typeName = (i: number): string => data.chart.types[i] ?? '?'
@@ -34,14 +36,21 @@ export function LookForTab(props: Props) {
   return (
     <div>
       <div class="card">
-        <h2>Pokémon to look for</h2>
-        <p class="muted" style="margin:0">
-          Species you don't own yet that would most improve {team.length ? 'your team' : 'the best six you own'}.
-          {data.obtain
-            ? ' Only what this hack lets you get, with where to find it.'
-            : ' Legendaries, event Pokémon and very rare catches are left out. Where to find them depends on your hack.'}{' '}
-          Anything an Ultra Ball can't realistically catch (under 10% a throw at 1 HP, asleep) is hidden.
-        </p>
+        <h2>{props.allow ? 'Capture next' : 'Pokémon to look for'}</h2>
+        {props.allow ? (
+          <p class="muted" style="margin:0">
+            Species that would most improve your party, swapping one out if it's full. Only what your run Pokédex
+            lets appear, without legendaries, which only come from legendary rooms.
+          </p>
+        ) : (
+          <p class="muted" style="margin:0">
+            Species you don't own yet that would most improve {team.length ? 'your team' : 'the best six you own'}.
+            {data.obtain
+              ? ' Only what this hack lets you get, with where to find it.'
+              : ' Legendaries, event Pokémon and very rare catches are left out. Where to find them depends on your hack.'}{' '}
+            Anything an Ultra Ball can't realistically catch (under 10% a throw at 1 HP, asleep) is hidden.
+          </p>
+        )}
       </div>
 
       {targets.length === 0 ? (

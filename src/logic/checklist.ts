@@ -1,5 +1,5 @@
 import type { GameData, RosterEntry } from '../types'
-import { DEFAULT_LEVEL, entryFromDex } from './member'
+import { entryFromDex } from './member'
 import type { Lookup } from './lookup'
 
 /**
@@ -10,7 +10,7 @@ import type { Lookup } from './lookup'
 export type DexMode = 'regional' | 'national'
 
 /** Battle-only forms: never caught, so never on the checklist. */
-const UNCATCHABLE_FORM = /\((Mega|Primal|Gigantamax|Eternamax)\b/
+export const UNCATCHABLE_FORM = /\((Mega|Primal|Gigantamax|Eternamax)\b/
 
 /**
  * Dex indices in the order the player's game lists them: the hack's regional
@@ -52,7 +52,6 @@ export function hasEdits(data: GameData, entry: RosterEntry): boolean {
     entry.ab !== fresh.ab ||
     entry.nt !== fresh.nt ||
     entry.st !== null ||
-    (entry.lv ?? DEFAULT_LEVEL) !== DEFAULT_LEVEL ||
     entry.mv.some((m) => m.trim() !== '')
   )
 }

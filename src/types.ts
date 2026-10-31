@@ -121,8 +121,6 @@ export interface RosterEntry {
   st: number[] | null
   /** Dex index, or -1 for a custom Pokemon with no vanilla counterpart. */
   d: number
-  /** Level, 1-100; absent in saves from before levels, read as 50. */
-  lv?: number
 }
 
 /** One Pokemon on a hack trainer's team, as data/hacks/<hack>.json stores it. */
@@ -169,6 +167,10 @@ export interface HackPack {
   learn?: Record<string, string[]>
   /** Boss teams per difficulty. */
   trainers?: Record<string, Trainer[]>
+  /** Emerald Rogue's run Pokédex choices: a species may appear when it or an earlier stage is listed and its generation is within `gen`. */
+  variants?: { id: string; label: string; gen: number; species: string[] }[]
+  /** Species the hack treats as legendary: never wild or a random starter. */
+  legendary?: string[]
   /** Names the build couldn't map, kept for review. */
   unmatched: string[]
 }

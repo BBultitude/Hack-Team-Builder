@@ -15,6 +15,8 @@ interface Props {
   onClose: () => void
   onRoster: (roster: RosterEntry[]) => void
   onTeam: (team: number[]) => void
+  /** Emerald Rogue: the roster is the party, so there is no team to toggle. */
+  party?: boolean
 }
 
 /**
@@ -65,7 +67,7 @@ export function PokemonModal(props: Props) {
               ref.current?.close()
             }}
             inTeam={team.includes(index)}
-            onToggleTeam={() => props.onTeam(toggleInTeam(team, index))}
+            onToggleTeam={props.party ? undefined : () => props.onTeam(toggleInTeam(team, index))}
             teamFull={team.length >= MAX_TEAM}
           />
         </div>

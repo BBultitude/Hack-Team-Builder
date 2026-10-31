@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs'
 import type { HackPack } from '../types'
 import { buildLookup } from './lookup'
 import { resolveOpponent } from './opponent'
-import { adaptRoster, forSetup, inGen, withHack } from './setup'
+import { adaptRoster, forSetup, inGen, runFilter, runVariant, withHack } from './setup'
 import { ballsFor, catchPlan } from './catching'
 import { autoBuild, lookFor } from './team'
 import { effectiveness } from './typeChart'
@@ -200,5 +200,46 @@ describe('withHack (Unbound pack)', () => {
     const foe = resolveOpponent(unbound, ub, { name: weedle.n, ability: weedle.ab, lv: weedle.lv, mv: weedle.mv })!
     expect(foe.level).toBe(17)
     expect(foe.moves.map((m) => m.n)).toContain('Bug Bite')
+  })
+})
+
+describe('Emerald Rogue run rules', () => {
+  const rogue = JSON.parse(readFileSync('data/hacks/rogue.json', 'utf8')) as HackPack
+  const rdata = withHack(data, rogue)
+  const rl = buildLookup(rdata)
+  const allows = (variant: string) => runFilter(rdata, rl, rogue, variant)!
+  const at = (name: string): number => rl.dexByName.get(name.toLowerCase())!
+
+  it('only applies to a hack with run Pokédex variants', () => {
+    expect(runFilter(data, lookup, null, '')).toBeUndefined()
+    expect(runVariant(rogue, 'nope')?.id).toBe('rogue_modern')
+  })
+
+  it('caps by generation, so a Gen 1 run allows Zubat and Golbat but not Crobat', () => {
+    const rby = allows('kanto_rby')
+    expect([rby(at('Zubat')), rby(at('Golbat')), rby(at('Crobat')), rby(at('Sprigatito'))]).toEqual([true, true, false, false])
+  })
+
+  it('lets a listed base form bring in its regional form and evolutions within the cap', () => {
+    const letsGo = allows('kanto_letsgo')
+    expect(letsGo(at('Vulpix (Alola)'))).toBe(true)
+    expect(letsGo(at('Ninetales (Alola)'))).toBe(true)
+    expect(allows('kanto_rby')(at('Vulpix (Alola)'))).toBe(false)
+  })
+
+  it('never allows legendaries, their forms, or battle-only forms', () => {
+    const all = allows('national_gen9')
+    expect([all(at('Mewtwo')), all(at('Articuno (Galar)')), all(at('Charizard (Mega X)'))]).toEqual([false, false, false])
+  })
+
+  it('Capture next only offers what the run allows', () => {
+    const rby = allows('kanto_rby')
+    const roster = ['Charizard', 'Blastoise'].map((n) => entryFromDex(rdata, n, at(n)))
+    const targets = lookFor(rdata, rl, roster, [0, 1], 60, rby)
+    expect(targets.length).toBeGreaterThan(0)
+    for (const t of targets) {
+      expect(rby(t.index)).toBe(true)
+      expect(rdata.dex[t.index]!.g).toBe(1)
+    }
   })
 })

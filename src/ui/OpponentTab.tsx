@@ -24,6 +24,9 @@ interface Props {
   lookup: Lookup
   roster: RosterEntry[]
   team: number[]
+  /** The team's level, which every member is assumed to be at. */
+  level: number
+  onLevel: (level: number) => void
   opponent: SavedOpponent | null
   scope: RankScope
   /** Roster index of the Pokemon currently out; also set from the party bar. */
@@ -73,8 +76,8 @@ export function OpponentTab(props: Props) {
       indices
         .map((i) => roster[i])
         .filter((e): e is RosterEntry => e !== undefined)
-        .map((e) => resolveMember(data, lookup, e)),
-    [data, lookup, roster, indices.join(',')],
+        .map((e) => resolveMember(data, lookup, e, props.level)),
+    [data, lookup, roster, indices.join(','), props.level],
   )
 
   const ranked = useMemo(
@@ -159,13 +162,13 @@ export function OpponentTab(props: Props) {
               </div>
             </div>
             <label class="field">
-              <span>Level (optional)</span>
+              <span>Its level (optional)</span>
               <input
                 type="number"
                 inputMode="numeric"
                 min={1}
                 max={100}
-                placeholder="Same as each of yours"
+                placeholder="Same as your team's"
                 value={opponent?.lv === undefined ? '' : String(opponent.lv)}
                 onInput={(e) => {
                   const v = e.currentTarget.value
@@ -213,6 +216,23 @@ export function OpponentTab(props: Props) {
             </label>
           </>
         )}
+
+        <label class="field">
+          <span>Your team's level</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={100}
+            value={String(props.level)}
+            onInput={(e) => {
+              const v = e.currentTarget.value
+              // An emptied box is mid-edit, not level 1; saving 1 would turn a retyped "45" into "145".
+              if (v !== '') props.onLevel(Math.min(Math.max(Math.trunc(Number(v) || 1), 1), 100))
+            }}
+          />
+          <span class="muted">Every Pokémon you own is assumed to be at this level, so one a level or two behind still counts.</span>
+        </label>
 
         <div class="row">
           <span class="muted grow">Rank</span>
@@ -330,8 +350,8 @@ export function OpponentTab(props: Props) {
               {resolved.moves.length
                 ? ` Uses ${resolved.name}'s known moves.`
                 : ` ${resolved.name}'s moves are unknown, so its strongest learnable moves of its own types are assumed.`}
-              {resolved.level === null && ` Its level is assumed to match each of yours.`} Your Pokémon are
-              assumed untrained (no EVs, perfect IVs); no critical hits or weather.
+              {resolved.level === null && ` Its level is assumed to match your team's.`} Your Pokémon are
+              assumed to be level {props.level} and untrained (no EVs, perfect IVs); no critical hits or weather.
             </p>
           </div>
         </>

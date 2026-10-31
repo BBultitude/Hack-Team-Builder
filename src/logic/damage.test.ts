@@ -3,7 +3,7 @@ import type { Move, RosterEntry } from '../types'
 import { STAT } from '../types'
 import { data, lookup, dexIndex } from './testData'
 import { type Battler, estimate, statAt } from './damage'
-import { resolveMember } from './member'
+import { type Member, resolveMember } from './member'
 import { rankMember, rankMembers, resolveOpponent } from './opponent'
 
 const move = (name: string): Move => data.moves[lookup.moveByName.get(name.toLowerCase())!]!
@@ -13,10 +13,12 @@ function battler(name: string, level: number, more: Partial<Battler> = {}): Batt
   return { level, base: e.s, types: e.t, ability: '', nature: null, ...more }
 }
 
-function own(name: string, lv: number, mv: string[] = []): RosterEntry {
+/** A member at its own level; in the app the team level stands in for every one. */
+function own(name: string, lv: number, mv: string[] = []): Member {
   const d = dexIndex(name)
   const e = data.dex[d]!
-  return { n: e.n, a: e.t[0]!, b: e.t[1] ?? -1, ab: '', nt: 0, mv: [...mv, '', '', '', ''].slice(0, 4), st: null, d, lv }
+  const entry: RosterEntry = { n: e.n, a: e.t[0]!, b: e.t[1] ?? -1, ab: '', nt: 0, mv: [...mv, '', '', '', ''].slice(0, 4), st: null, d }
+  return resolveMember(data, lookup, entry, lv)
 }
 
 describe('stats at a level', () => {
@@ -60,13 +62,13 @@ describe('the reported case: neutral hits from a stronger boss', () => {
   const boss = resolveOpponent(data, lookup, { name: 'Garchomp', ability: '', lv: 60, mv: ['Earthquake', 'Dragon Claw'] })!
 
   it('flags a low-level member taking only neutral damage as a one-hit knockout', () => {
-    const r = rankMember(data, resolveMember(data, lookup, own('Pikachu', 30, ['Thunderbolt'])), boss, 0)
+    const r = rankMember(data, own('Pikachu', 30, ['Thunderbolt']), boss, 0)
     expect(r.ohkoRisk).toBe(true)
   })
 
   it('ranks it below a member that is hit super-effectively but survives', () => {
-    const weak = resolveMember(data, lookup, own('Snorlax', 25, ['Body Slam']))
-    const sturdy = resolveMember(data, lookup, own('Golem', 80, ['Stone Edge']))
+    const weak = own('Snorlax', 25, ['Body Slam'])
+    const sturdy = own('Golem', 80, ['Stone Edge'])
     const ranked = rankMembers(data, [weak, sturdy], boss)
     expect(ranked[1]!.worstIncoming!.multiplier).toBe(1)
     expect(ranked[0]!.name).toBe('Golem')
@@ -77,7 +79,7 @@ describe('the reported case: neutral hits from a stronger boss', () => {
 })
 
 describe('coverage moves', () => {
-  const skarmory = resolveMember(data, lookup, own('Skarmory', 50, ['Brave Bird']))
+  const skarmory = own('Skarmory', 50, ['Brave Bird'])
 
   it('uses a known coverage move that type-only reasoning would miss', () => {
     const boss = resolveOpponent(data, lookup, { name: 'Garchomp', ability: '', lv: 50, mv: ['Earthquake', 'Fire Fang'] })!

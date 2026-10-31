@@ -18,6 +18,8 @@ interface Props {
   lookup: Lookup
   roster: RosterEntry[]
   team: number[]
+  /** Emerald Rogue: the team is the run's party, with no boxes to build from. */
+  partyOnly?: boolean
   onTeam: (team: number[]) => void
   /** Opens a roster entry's details. */
   onOpen: (rosterIndex: number) => void
@@ -39,8 +41,8 @@ export function TeamTab(props: Props) {
   const analysis = useMemo(() => analyseTeam(data, members), [data, members])
   const recommended = useMemo(() => recommendMoves(data, members), [data, members])
   const suggestions = useMemo(
-    () => suggestAdditions(data, lookup, roster, team),
-    [data, lookup, roster, team],
+    () => (props.partyOnly ? [] : suggestAdditions(data, lookup, roster, team)),
+    [data, lookup, roster, team, props.partyOnly],
   )
 
   const typeName = (i: number): string => data.chart.types[i] ?? '?'
@@ -50,19 +52,28 @@ export function TeamTab(props: Props) {
       <div class="card">
         <div class="row">
           <h2 class="grow" style="margin:0">
-            Team ({team.length}/{MAX_TEAM})
+            {props.partyOnly ? 'Party' : 'Team'} ({team.length}/{MAX_TEAM})
           </h2>
-          <button
-            onClick={() => props.onTeam(autoBuild(data, lookup, roster))}
-            disabled={roster.length === 0}
-          >
-            Auto-build
-          </button>
+          {!props.partyOnly && (
+            <button
+              onClick={() => props.onTeam(autoBuild(data, lookup, roster))}
+              disabled={roster.length === 0}
+            >
+              Auto-build
+            </button>
+          )}
         </div>
+        {props.partyOnly && (
+          <p class="muted" style="margin:0.5rem 0 0">
+            Runs are short and there are no boxes to swap from, so get the most out of the party you have: teach
+            the moves below, and cover the gaps with your next catch.
+          </p>
+        )}
         {team.length === 0 ? (
           <p class="muted" style="margin:0.5rem 0 0">
-            Nothing on the team yet. Add Pokémon in the Pokédex tab, or use Auto-build to pick the
-            best six you own.
+            {props.partyOnly
+              ? 'No party yet. Add your starter in the Pokédex tab.'
+              : 'Nothing on the team yet. Add Pokémon in the Pokédex tab, or use Auto-build to pick the best six you own.'}
           </p>
         ) : (
           <>
@@ -81,11 +92,14 @@ export function TeamTab(props: Props) {
             <h2>Recommended moves</h2>
             <p class="muted" style="margin:0 0 0.5rem">
               Four learnable moves each, chosen so the team between them hits as many types as
-              possible. Based on vanilla learnsets.
+              possible. Based on vanilla learnsets; ones it doesn't know yet are marked to teach.
             </p>
             <div class="stack">
               {members.map((m, slot) => {
                 const recs = recommended[slot]
+                const knows = (name: string): boolean => m.moves.some((mv) => mv.n === name)
+                // Entered moves the plan leaves out: the first to give up for a taught one.
+                const spare = recs ? m.moves.filter((mv) => !recs.some((r) => r.move.n === mv.n)) : []
                 return (
                   <div key={`${m.entry.n}-${slot}`}>
                     <h3 class="row" style="margin:0 0 0.2rem;gap:0.3rem">
@@ -101,6 +115,7 @@ export function TeamTab(props: Props) {
                         {recs.map((r) => (
                           <li key={r.move.n}>
                             <strong>{r.move.n}</strong>{' '}
+                            {m.moves.length > 0 && (knows(r.move.n) ? <span class="pill">Knows it</span> : <span class="muted">(teach)</span>)}{' '}
                             <span class="muted">
                               {typeName(r.move.t)}, power {r.move.p}
                               {r.stab ? ', Same-Type Attack Bonus' : ''}
@@ -110,6 +125,11 @@ export function TeamTab(props: Props) {
                           </li>
                         ))}
                       </ol>
+                    )}
+                    {spare.length > 0 && (
+                      <p class="muted" style="margin:0.2rem 0 0">
+                        Could replace: {spare.map((mv) => mv.n).join(', ')}.
+                      </p>
                     )}
                   </div>
                 )

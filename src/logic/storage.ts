@@ -1,6 +1,10 @@
 import type { GameData, RosterEntry } from '../types'
 import type { Lookup } from './lookup'
 import { MAX_TEAM } from './team'
+import { DEFAULT_LEVEL } from './member'
+
+/** Emerald Rogue's Day Care, fully upgraded. */
+export const DAYCARE_SLOTS = 3
 
 /** Before game setups there was one save under this key; it migrates into the first setup. */
 const LEGACY_KEY = 'ptb2'
@@ -31,9 +35,26 @@ export interface SavedState {
   team: number[]
   opponent: SavedOpponent | null
   scope: RankScope
+  /** The team's level: every member is assumed to be at it. */
+  level: number
+  /** Emerald Rogue: dex names roaming the hub's overworld, in the order ticked. */
+  overworld: string[]
+  /** Emerald Rogue: overworld names left in the Day Care, at most DAYCARE_SLOTS. */
+  daycare: string[]
+  /** Emerald Rogue: the run's Pokédex variant id; '' for the game's default. */
+  runDex: string
 }
 
-export const EMPTY_STATE: SavedState = { roster: [], team: [], opponent: null, scope: 'team' }
+export const EMPTY_STATE: SavedState = {
+  roster: [],
+  team: [],
+  opponent: null,
+  scope: 'team',
+  level: DEFAULT_LEVEL,
+  overworld: [],
+  daycare: [],
+  runDex: '',
+}
 
 export interface StoredShape {
   v?: number
@@ -41,6 +62,10 @@ export interface StoredShape {
   t?: unknown
   o?: unknown
   s?: unknown
+  l?: unknown
+  w?: unknown
+  dc?: unknown
+  rd?: unknown
 }
 
 function num(value: unknown, fallback: number): number {
@@ -51,7 +76,11 @@ function str(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
-const level = (v: unknown): number => Math.min(Math.max(Math.trunc(num(v, 50)), 1), 100)
+const level = (v: unknown): number => Math.min(Math.max(Math.trunc(num(v, DEFAULT_LEVEL)), 1), 100)
+
+/** Unique non-empty names. */
+const names = (v: unknown): string[] =>
+  Array.isArray(v) ? [...new Set(v.map(str).map((n) => n.trim()).filter(Boolean))] : []
 
 const six = (v: unknown, max: number): number[] | undefined =>
   Array.isArray(v) && v.length === 6 ? v.map((x) => Math.min(Math.max(Math.trunc(num(x, 0)), 0), max)) : undefined
@@ -119,7 +148,6 @@ function parseEntry(raw: unknown, data: GameData, lookup: Lookup): RosterEntry |
     mv: moves,
     st: stats,
     d: dex,
-    ...(o.lv === undefined ? {} : { lv: level(o.lv) }),
   }
 }
 
@@ -157,12 +185,33 @@ export function parseState(raw: unknown, data: GameData, lookup: Lookup): SavedS
     : []
 
   const opponent = parseOpponent(parsed.o, data.natures.length)
+  const overworld = names(parsed.w)
 
-  return { roster, team, opponent, scope: parsed.s === 'all' ? 'all' : 'team' }
+  return {
+    roster,
+    team,
+    opponent,
+    scope: parsed.s === 'all' ? 'all' : 'team',
+    level: level(parsed.l),
+    overworld,
+    daycare: names(parsed.dc).filter((n) => overworld.includes(n)).slice(0, DAYCARE_SLOTS),
+    runDex: str(parsed.rd),
+  }
 }
 
 export function serialiseState(state: SavedState): StoredShape {
-  return { v: 1, r: state.roster, t: state.team, o: state.opponent, s: state.scope }
+  return {
+    v: 1,
+    r: state.roster,
+    t: state.team,
+    o: state.opponent,
+    s: state.scope,
+    l: state.level,
+    // Rogue-only fields stay out of other games' saves.
+    ...(state.overworld.length ? { w: state.overworld } : {}),
+    ...(state.daycare.length ? { dc: state.daycare } : {}),
+    ...(state.runDex ? { rd: state.runDex } : {}),
+  }
 }
 
 export function load(data: GameData, lookup: Lookup, id: string): SavedState {

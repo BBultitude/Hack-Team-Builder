@@ -306,6 +306,42 @@ function check(name: string, ctx: Context, speciesCount: number): void {
   }
 }
 
+const DEX_REGIONS: Record<string, string> = {
+  ROGUE: 'Rogue', KANTO: 'Kanto', JOHTO: 'Johto', HOENN: 'Hoenn', SINNOH: 'Sinnoh', UNOVA: 'Unova', KALOS: 'Kalos',
+  ALOLA: 'Alola', GALAR: 'Galar', PALDEA: 'Paldea', EXTRAS: 'Extras', LEGENDS: 'Legends', NATIONAL: 'National',
+}
+
+/** Dex name for a SPECIES_ constant, or undefined (noted as unmatched). */
+function speciesName(ctx: Context, constant: string): string | undefined {
+  const i = ctx.dexByKey.get(speciesKey(constant))
+  if (i === undefined) ctx.unmatched.add(constant)
+  return i === undefined ? undefined : ctx.dex[i]!.n
+}
+
+/** Rogue's Pokédex variants (src/data/rogue_pokedex.h): each a base-species list and a generation cap. */
+export function rogueVariants(ctx: Context, text: string): NonNullable<HackPack['variants']> {
+  const label = new Map([...text.matchAll(/sRogueDexVariantName_(\w+)\[\] = _\("([^"]*)"\)/g)].map((m) => [m[1]!, m[2]!]))
+  const lists = new Map(
+    [...text.matchAll(/sRogueDexVariant_(\w+)\[\] =\s*\{([^}]*)\}/g)].map((m) => [m[1]!, [...m[2]!.matchAll(/SPECIES_\w+/g)].map((c) => c[0])]),
+  )
+  return [...text.matchAll(/\[POKEDEX_VARIANT_(\w+)\] =\s*\{\s*\.displayName[^}]*?\.genLimit = (\d+)/g)].map((m) => {
+    const id = m[1]!
+    const region = DEX_REGIONS[id.split('_')[0]!] ?? id
+    return {
+      id: id.toLowerCase(),
+      label: `${region} ${label.get(id) ?? id}`,
+      gen: Number(m[2]),
+      species: [...new Set((lists.get(id) ?? []).map((c) => speciesName(ctx, c)).filter((n): n is string => !!n))],
+    }
+  })
+}
+
+/** Species RoguePokedex_IsSpeciesLegendary lists (src/rogue_pokedex.c); Rogue applies it to every form. */
+export function rogueLegendaries(ctx: Context, text: string): string[] {
+  const body = /bool8 RoguePokedex_IsSpeciesLegendary\(u16 species\)([\s\S]*?)return TRUE;/.exec(text)?.[1] ?? ''
+  return [...new Set([...body.matchAll(/case (SPECIES_\w+):/g)].map((m) => speciesName(ctx, m[1]!)).filter((n): n is string => !!n))]
+}
+
 async function main(): Promise<void> {
   const [chart, dex, moves, learnsets, natures] = await Promise.all([
     readJson<TypeChart>('typechart.json'),
@@ -407,6 +443,8 @@ async function main(): Promise<void> {
       const blocks = new Map([...speciesBlocks(text)].map(([k, b]) => [k, expand(b)]))
       count += diffSpecies(ctx, blocks, pack, new Map())
     }
+    pack.variants = rogueVariants(ctx, await source(ROGUE, 'src/data/rogue_pokedex.h'))
+    pack.legendary = rogueLegendaries(ctx, await source(ROGUE, 'src/rogue_pokedex.c'))
     pack.unmatched = [...ctx.unmatched]
     check('rogue', ctx, count)
     await writeFile(join(OUT, 'rogue.json'), JSON.stringify(pack))

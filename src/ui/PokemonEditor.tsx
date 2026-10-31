@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks'
 import type { GameData, RosterEntry } from '../types'
 import { STAT_NAMES } from '../types'
 import { MODELLED_ABILITIES } from '../logic/abilities'
-import { DEFAULT_LEVEL, type Member, evolve, incomingMultiplier, resolveMember } from '../logic/member'
+import { type Member, evolve, incomingMultiplier, resolveMember } from '../logic/member'
 import type { Lookup } from '../logic/lookup'
 import { MAX_GEN, inGen, moveNames as movesInGen } from '../logic/setup'
 import { Suggest } from './Suggest'
@@ -16,7 +16,8 @@ interface Props {
   onChange: (next: RosterEntry) => void
   onRemove: () => void
   inTeam: boolean
-  onToggleTeam: () => void
+  /** Absent when everything owned is the party (Emerald Rogue): no team to toggle. */
+  onToggleTeam?: () => void
   teamFull: boolean
 }
 
@@ -51,14 +52,16 @@ export function PokemonEditor(props: Props) {
           <h2 id="pokemon-modal-title" class="truncate" style="margin:0">{entry.n}</h2>
           <Types data={data} types={entry.b >= 0 ? [entry.a, entry.b] : [entry.a]} />
         </span>
-        <button
-          class={props.inTeam ? 'primary' : ''}
-          onClick={props.onToggleTeam}
-          disabled={!props.inTeam && props.teamFull}
-          title={props.inTeam ? 'Remove from team' : 'Add to team'}
-        >
-          {props.inTeam ? 'On team' : 'Add'}
-        </button>
+        {props.onToggleTeam && (
+          <button
+            class={props.inTeam ? 'primary' : ''}
+            onClick={props.onToggleTeam}
+            disabled={!props.inTeam && props.teamFull}
+            title={props.inTeam ? 'Remove from team' : 'Add to team'}
+          >
+            {props.inTeam ? 'On team' : 'Add'}
+          </button>
+        )}
       </div>
 
       {vanilla?.ev && (
@@ -96,18 +99,6 @@ export function PokemonEditor(props: Props) {
             />
           </label>
         )}
-
-        <label class="field">
-          <span>Level</span>
-          <input
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={100}
-            value={String(entry.lv ?? DEFAULT_LEVEL)}
-            onInput={(e) => patch({ lv: Math.min(Math.max(Math.trunc(Number(e.currentTarget.value) || 1), 1), 100) })}
-          />
-        </label>
 
         <label class="field">
           <span>Nature</span>
@@ -215,8 +206,11 @@ export function PokemonEditor(props: Props) {
                       max={999}
                       value={String(currentStats[i] ?? 0)}
                       onInput={(e) => {
+                        const v = e.currentTarget.value
+                        // An emptied box is mid-edit; saving 1 would turn a retyped "100" into "1100".
+                        if (v === '') return
                         const next = [...currentStats]
-                        next[i] = Math.max(1, Number(e.currentTarget.value) || 1)
+                        next[i] = Math.min(Math.max(Math.trunc(Number(v) || 1), 1), 999)
                         patch({ st: next })
                       }}
                     />

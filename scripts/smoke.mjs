@@ -99,7 +99,7 @@ await step('evolving moves the tick to the evolution', async () => {
 
 await step('unticking an edited Pokémon needs a second untick', async () => {
   await openMon('Vaporeon')
-  await page.locator(`${modal} label:has-text("Level") input`).fill('33')
+  await page.locator(`${modal} label:has-text("Nature") select`).selectOption({ index: 0 })
   await page.keyboard.press('Escape')
   await tick('Vaporeon')
   await page.waitForSelector('.dex-pending:has-text("Vaporeon has edits")', { timeout: 5000 })
@@ -349,11 +349,13 @@ await step('an Unbound game offers boss teams and rates damage by level', async 
     await tick('Pikachu')
   })
   await waitCaught(1).catch(() => {})
-  await openMon('Pikachu')
-  await page.locator(`${modal} label:has-text("Level") input`).fill('20')
-  await page.keyboard.press('Escape')
-
   await page.click('button[role="tab"]:has-text("Opponent")')
+  // Clear and retype like a person: an emptied box must not snap to 1 (which made "45" into "145").
+  const teamLevel = page.locator('label:has-text("Your team\'s level") input')
+  await teamLevel.fill('')
+  await teamLevel.pressSequentially('45')
+  if ((await teamLevel.inputValue()) !== '45') throw new Error(`retyped level reads ${await teamLevel.inputValue()}`)
+  await teamLevel.fill('20')
   await page.fill('input[placeholder*="Leader, rival"]', 'Champion Jax')
   await page.locator('.suggest-list button:text-is("Champion Jax")').click()
   await page.locator('[role="group"][aria-label*="Champion Jax"] button').first().click()
@@ -363,6 +365,40 @@ await step('an Unbound game offers boss teams and rates damage by level', async 
   const best = await page.locator('.card:has(h2:has-text("Best:"))').innerText()
   if (!/Takes \d/.test(best)) throw new Error(`no damage numbers: ${best.slice(0, 160)}`)
   console.log('        ' + best.replace(/\n+/g, ' | ').slice(0, 220))
+})
+
+await step('an Emerald Rogue game tracks the overworld, Day Care and a six-Pokémon party', async () => {
+  await page.click('button[role="tab"]:has-text("Pokédex")')
+  if (!(await page.locator('button:text-is("New game")').isVisible())) await page.locator('summary:has-text("Game setup")').click()
+  await page.click('button:text-is("New game")')
+  await page.locator('.sub-panel label:has-text("Hack data") select').selectOption('rogue')
+  await page.click('button:text-is("Create game")')
+  await page.locator('label:has-text("Run Pokédex") select').selectOption('kanto_rby', { timeout: 10000 })
+  if ((await page.locator('button[role="tab"]').allTextContents()).join(',') !== 'Pokédex,Party,Capture Next,Opponent') {
+    throw new Error('Rogue tabs not renamed')
+  }
+
+  await page.fill('input[aria-label="Filter the Pokédex by name"]', 'Zubat')
+  await page.locator('input[aria-label="Zubat in the overworld"]').dispatchEvent('click')
+  await page.locator('button[aria-label="Zubat in the Day Care"]').click()
+  await page.click('button:has-text("Day Care 1/3")')
+  if ((await page.locator('.dex-row').count()) !== 1) throw new Error('Day Care filter should show only Zubat')
+
+  const join = async (name) => {
+    await page.fill('input[placeholder="Search any Pokémon"]', name)
+    await page.locator(`.suggest-list button:text-is("${name}")`).click({ timeout: 5000 })
+  }
+  for (const n of ['Bulbasaur', 'Charmander', 'Squirtle', 'Pikachu', 'Eevee', 'Abra']) await join(n)
+  await join('Mareep')
+  await page.waitForSelector('[role="group"][aria-label="Party is full"]', { timeout: 5000 })
+  await page.locator('[role="group"][aria-label="Party is full"] button:has-text("Pikachu")').click()
+  const party = await page.locator('.party-slot:not(.empty)').evaluateAll((els) => els.map((e) => e.title))
+  if (party.join(',') !== 'Bulbasaur,Charmander,Squirtle,Mareep,Eevee,Abra') throw new Error(`party: ${party}`)
+
+  await page.click('button[role="tab"]:has-text("Party")')
+  if (await page.locator('button:text-is("Auto-build")').count()) throw new Error('Auto-build shown in Rogue')
+  await page.click('button[role="tab"]:has-text("Capture Next")')
+  await page.waitForSelector('h2:text-is("Capture next")', { timeout: 5000 })
 })
 
 await step('the Dex header and party stay put while the screen scrolls', async () => {

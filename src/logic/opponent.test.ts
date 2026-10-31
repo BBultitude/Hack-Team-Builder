@@ -22,7 +22,7 @@ function own(name: string, over: Partial<RosterEntry> = {}): RosterEntry {
   return { n: e.n, a: e.t[0]!, b: e.t[1] ?? -1, ab: '', nt: 0, mv: ['', '', '', ''], st: null, d, ...over }
 }
 
-const member = (e: RosterEntry) => resolveMember(data, lookup, e)
+const member = (e: RosterEntry, level?: number) => resolveMember(data, lookup, e, level)
 
 function opponentOf(name: string, ability = '', more: Partial<SavedOpponent> = {}): Opponent {
   return resolveOpponent(data, lookup, { name, ability, ...more })!
@@ -103,8 +103,8 @@ describe('ranking', () => {
     // Snorlax Lv 50 walls a Lv 50 Machamp boss far better than a slow, frail attacker would,
     // but if it cannot win the exchange it still ranks below one that survives and wins.
     const boss = opponentOf('Machamp', '', { lv: 50, mv: ['Close Combat'] })
-    const wall = member(own('Snorlax', { mv: ['Tackle', '', '', ''], lv: 50 }))
-    const winner = member(own('Alakazam', { mv: ['Psychic', '', '', ''], lv: 70 }))
+    const wall = member(own('Snorlax', { mv: ['Tackle', '', '', ''] }), 50)
+    const winner = member(own('Alakazam', { mv: ['Psychic', '', '', ''] }), 70)
     const ranked = rankMembers(data, [wall, winner], boss)
     const [first, second] = ranked
     expect(first!.wins).toBe(true)
@@ -114,7 +114,7 @@ describe('ranking', () => {
 
   it('counts a Speed tie as losing the exchange', () => {
     const boss = opponentOf('Jolteon', '', { lv: 50, mv: ['Thunderbolt'] })
-    const mirror = rankMember(data, member(own('Jolteon', { mv: ['Thunderbolt', '', '', ''], lv: 50 })), boss, 0)
+    const mirror = rankMember(data, member(own('Jolteon', { mv: ['Thunderbolt', '', '', ''] }), 50), boss, 0)
     // A mirror is a Speed tie; it also loses on rolls, as its worst roll is set against the boss's best.
     expect(mirror.faster).toBeNull()
     expect(mirror.myHits).toBeGreaterThanOrEqual(mirror.theirHits)
@@ -124,10 +124,10 @@ describe('ranking', () => {
   it('warns when a setup boss would get three or more turns', () => {
     const boss = opponentOf('Dragonite', '', { lv: 60, mv: ['Dragon Dance', 'Outrage'] })
     expect(boss.setup).toBe('Dragon Dance')
-    const slow = rankMember(data, member(own('Snorlax', { mv: ['Tackle', '', '', ''], lv: 60 })), boss, 0)
+    const slow = rankMember(data, member(own('Snorlax', { mv: ['Tackle', '', '', ''] }), 60), boss, 0)
     expect(slow.myHits).toBeGreaterThanOrEqual(3)
     expect(slow.setupRisk).toBe(true)
-    const quick = rankMember(data, member(own('Mamoswine', { mv: ['Icicle Crash', '', '', ''], lv: 60 })), boss, 0)
+    const quick = rankMember(data, member(own('Mamoswine', { mv: ['Icicle Crash', '', '', ''] }), 60), boss, 0)
     expect(quick.myHits).toBeLessThanOrEqual(2)
     expect(quick.setupRisk).toBe(false)
   })

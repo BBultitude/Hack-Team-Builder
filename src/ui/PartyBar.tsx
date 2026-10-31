@@ -11,6 +11,8 @@ interface Props {
   lookup: Lookup
   roster: RosterEntry[]
   team: number[]
+  /** The team's level, which every member is assumed to be at. */
+  level: number
   /** Set on the Opponent tab: each slot then shows how hard the opponent hits it. */
   opponent: SavedOpponent | null
   /** Roster index currently out against the opponent. */
@@ -41,7 +43,7 @@ export function PartyBar(props: Props) {
             </button>
           )
         }
-        const r = foe ? rankMember(data, resolveMember(data, lookup, entry), foe, slot) : null
+        const r = foe ? rankMember(data, resolveMember(data, lookup, entry, props.level), foe, slot) : null
         const m = r ? mark(r.takes?.max ?? 0, r.ohkoRisk) : null
         return (
           <button

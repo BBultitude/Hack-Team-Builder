@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { expandMacros, firstBranches, key, parseSets } from './build-hacks'
+import { expandMacros, firstBranches, key, parseSets, rogueLegendaries, rogueVariants } from './build-hacks'
 
 describe('build-hacks parsers', () => {
   it('keeps the first branch of each #if', () => {
@@ -19,5 +19,27 @@ describe('build-hacks parsers', () => {
 
   it('normalises names from every source to one key', () => {
     expect(key('Ninetales (Alola)')).toBe(key('Ninetales-Alola'))
+  })
+
+  const dex = [{ n: 'Zubat' }, { n: 'Golbat' }, { n: 'Mew' }]
+  const ctx = () =>
+    ({ dex, dexByKey: new Map(dex.map((d, i) => [key(d.n), i])), unmatched: new Set<string>() }) as unknown as Parameters<typeof rogueVariants>[0]
+
+  it("reads Rogue's dex variants with their generation caps", () => {
+    const text = [
+      'const u8 sRogueDexVariantName_KANTO_RBY[] = _("Red/Blue/Yellow");',
+      'const u16 sRogueDexVariant_KANTO_RBY[] = \n{\n\tSPECIES_ZUBAT,\n\tSPECIES_GOLBAT,\n\tSPECIES_NOPE,\n};',
+      'const struct RoguePokedexVariant gPokedexVariants[POKEDEX_VARIANT_COUNT] = \n{',
+      '\t[POKEDEX_VARIANT_KANTO_RBY] = \n\t{\n\t\t.displayName = sRogueDexVariantName_KANTO_RBY,\n\t\t.genLimit = 1,\n\t},',
+      '};',
+    ].join('\n')
+    const c = ctx()
+    expect(rogueVariants(c, text)).toEqual([{ id: 'kanto_rby', label: 'Kanto Red/Blue/Yellow', gen: 1, species: ['Zubat', 'Golbat'] }])
+    expect([...(c as unknown as { unmatched: Set<string> }).unmatched]).toEqual(['SPECIES_NOPE'])
+  })
+
+  it("reads Rogue's legendary list", () => {
+    const text = 'bool8 RoguePokedex_IsSpeciesLegendary(u16 species)\n{\n    switch(species)\n    {\n        case SPECIES_MEW:\n            return TRUE;\n    };\n    return FALSE;\n}\nbool8 Other(u16 species) { case SPECIES_ZUBAT: return TRUE; }'
+    expect(rogueLegendaries(ctx(), text)).toEqual(['Mew'])
   })
 })

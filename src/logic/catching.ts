@@ -171,12 +171,29 @@ export interface CatchSource {
 /**
  * How the player can get `target` in this setup, or null when they can't
  * realistically: not in the hack, above the generation cap, or a catch that
- * needs a Master Ball. `family` lists the dex indices sharing its family.
+ * needs a Master Ball. `family` lists the dex indices sharing its family;
+ * `allow`, when given, is the run's rules and decides alone.
  */
-export function catchSource(data: GameData, target: number, family: readonly number[]): CatchSource | null {
+export function catchSource(
+  data: GameData,
+  target: number,
+  family: readonly number[],
+  allow?: (dexIndex: number) => boolean,
+): CatchSource | null {
   const gen = data.gen ?? 9
   const dex = data.dex[target]
   if (!dex) return null
+
+  // Run rules (Emerald Rogue) replace the vanilla gates: every wild Pokemon there can be caught with balls.
+  if (allow) {
+    if (!allow(target)) return null
+    let from = target
+    for (const x of family) {
+      const path = evolutionPath(data, x, target)
+      if (allow(x) && path[0] === x && path.length > evolutionPath(data, from, target).length) from = x
+    }
+    return { from, gift: false }
+  }
   const catchable = (from: number, gift: boolean): boolean =>
     (data.dex[from]?.g ?? 99) <= gen && (gift || !needsMasterBall(data.dex[from]?.cr ?? 0, gen))
 

@@ -4,7 +4,7 @@ import { applyDefensiveAbility, type DefenceResult } from './abilities'
 import { effectiveness } from './typeChart'
 import { roleOf, type Role } from './stats'
 
-/** Level assumed for Pokemon saved before levels existed. */
+/** Team level until the player sets one. */
 export const DEFAULT_LEVEL = 50
 
 /** A roster entry resolved against the loaded data, ready for scoring. */
@@ -29,7 +29,8 @@ export interface Member {
   level: number
 }
 
-export function resolveMember(data: GameData, lookup: Lookup, entry: RosterEntry): Member {
+/** `level` is the team's: every member is assumed at it, so one a level or two behind isn't written off. */
+export function resolveMember(data: GameData, lookup: Lookup, entry: RosterEntry, level = DEFAULT_LEVEL): Member {
   const types = entry.b >= 0 ? [entry.a, entry.b] : [entry.a]
 
   const vanilla = entry.d >= 0 ? data.dex[entry.d] : undefined
@@ -58,7 +59,7 @@ export function resolveMember(data: GameData, lookup: Lookup, entry: RosterEntry
     attackTypes: assumedFromTypes ? types : fromMoves,
     assumedFromTypes,
     role: roleOf(stats, nature),
-    level: entry.lv ?? DEFAULT_LEVEL,
+    level,
   }
 }
 
@@ -89,7 +90,6 @@ export function entryFromDex(data: GameData, name: string, dexIndex: number | un
     mv: ['', '', '', ''],
     st: null,
     d: dexIndex ?? -1,
-    lv: DEFAULT_LEVEL,
   }
 }
 
@@ -102,7 +102,7 @@ export function evolve(data: GameData, entry: RosterEntry, target: number): Rost
   const next = entryFromDex(data, '', target)
   const dex = data.dex[target]
   const keepsAbility = !!dex && [...dex.ab, ...dex.hab].includes(entry.ab)
-  return { ...next, nt: entry.nt, mv: [...entry.mv], ab: keepsAbility ? entry.ab : next.ab, lv: entry.lv ?? DEFAULT_LEVEL }
+  return { ...next, nt: entry.nt, mv: [...entry.mv], ab: keepsAbility ? entry.ab : next.ab }
 }
 
 /** Dex indices from one stage to a later one, both ends included; [to] when unrelated. */

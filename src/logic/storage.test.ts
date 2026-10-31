@@ -54,6 +54,10 @@ const sample: SavedState = {
   team: [0],
   opponent: { name: 'Gengar', ability: 'Levitate' },
   scope: 'all',
+  level: 50,
+  overworld: [],
+  daycare: [],
+  runDex: '',
 }
 
 describe('setup hack fields', () => {
@@ -65,10 +69,20 @@ describe('setup hack fields', () => {
 })
 
 describe('levels and opponent details', () => {
-  it('keeps old saves without a level, and clamps bad ones', () => {
-    const entry = sample.roster[0]!
-    const back = round({ ...sample, roster: [entry, { ...entry, lv: 500 }, { ...entry, lv: 37 }] })
-    expect(back.roster.map((e) => e.lv)).toEqual([undefined, 100, 37])
+  it('keeps one team level, clamped, and drops per-Pokémon levels from old saves', () => {
+    expect(round({ ...sample, level: 37 }).level).toBe(37)
+    expect(round({ ...sample, level: 500 }).level).toBe(100)
+    localStorage.setItem(KEY, JSON.stringify({ v: 1, r: [{ ...sample.roster[0], lv: 12 }] }))
+    const old = load(data, lookup, ID)
+    expect(old.level).toBe(50)
+    expect(old.roster[0]).not.toHaveProperty('lv')
+  })
+
+  it('round-trips Emerald Rogue run state, keeping the Day Care to overworld Pokémon and three slots', () => {
+    const run = { ...sample, overworld: ['Zubat', 'Eevee', 'Ralts', 'Abra'], daycare: ['Zubat', 'Eevee', 'Ralts'], runDex: 'kanto_rby' }
+    expect(round(run)).toMatchObject({ overworld: run.overworld, daycare: run.daycare, runDex: 'kanto_rby' })
+    localStorage.setItem(KEY, JSON.stringify({ v: 1, w: ['Zubat', 'Zubat', 'Eevee'], dc: ['Mew', 'Zubat', 'Eevee', 'Zubat'] }))
+    expect(load(data, lookup, ID)).toMatchObject({ overworld: ['Zubat', 'Eevee'], daycare: ['Zubat', 'Eevee'] })
   })
 
   it('round-trips a trainer opponent and drops junk', () => {

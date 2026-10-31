@@ -259,6 +259,8 @@ export function lookFor(
   roster: readonly RosterEntry[],
   team: readonly number[],
   limit = 15,
+  /** A run's rules (Emerald Rogue): only species they allow, every one ball-catchable. */
+  allow?: (dexIndex: number) => boolean,
 ): LookForTarget[] {
   const baseIdx = team.length ? team : autoBuild(data, lookup, roster)
   const base = baseIdx
@@ -276,7 +278,7 @@ export function lookFor(
   data.dex.forEach((d, i) => {
     // Base 1 Hit Points (Shedinja) makes the type score meaningless.
     if (owned.has(d.fm) || d.s[0] === 1) return
-    const source = catchSource(data, i, families.get(d.fm) ?? [i])
+    const source = catchSource(data, i, families.get(d.fm) ?? [i], allow)
     if (!source) return
     const m = resolveMember(data, lookup, entryFromDex(data, d.n, i))
     const trials = base.length < MAX_TEAM ? [[...base, m]] : base.map((_, s) => base.map((b, j) => (j === s ? m : b)))

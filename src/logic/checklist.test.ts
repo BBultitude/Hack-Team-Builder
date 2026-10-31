@@ -38,10 +38,6 @@ describe('dex checklist', () => {
 
   it('treats a fresh catch as unedited, and any change as edited', () => {
     expect(hasEdits(data, fresh('Pikachu'))).toBe(false)
-    expect(hasEdits(data, { ...fresh('Pikachu'), lv: 30 })).toBe(true)
     expect(hasEdits(data, { ...fresh('Pikachu'), mv: ['Thunderbolt', '', '', ''] })).toBe(true)
-    // Saves from before levels have no lv; that is the default, not an edit.
-    const { lv: _lv, ...old } = fresh('Pikachu')
-    expect(hasEdits(data, old)).toBe(false)
   })
 })
