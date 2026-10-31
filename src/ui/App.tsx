@@ -36,6 +36,9 @@ type Tab = 'dex' | 'team' | 'look' | 'opponent'
 /** Unbound's middle trainer difficulty, used until the player picks one. */
 const DEFAULT_DIFFICULTY = 'expert'
 
+/** A text box has focus: the player is mid-edit. Pickers and ticks commit at once, so they don't count. */
+const isEditing = (): boolean => document.activeElement?.matches('input:not([type=checkbox], [type=radio]), textarea') ?? false
+
 const TABS: { id: Tab; label: string; party?: string }[] = [
   { id: 'dex', label: 'Pokédex' },
   { id: 'team', label: 'Best Team', party: 'Party' },
@@ -77,6 +80,8 @@ export function App() {
   const syncAgain = useRef(false)
   /** Newest updatedAt the server is known to have; anything newer here needs pushing. */
   const syncedStamp = useRef(-1)
+  /** A sync asked for while a field had focus, run when it loses focus. */
+  const editPending = useRef(false)
 
   const active: SetupMeta = liveSetups(setups).find((s) => s.id === setups.active) ?? liveSetups(setups)[0]!
   const pack = active.hack && packed?.hack === active.hack ? packed.pack : null
@@ -171,6 +176,11 @@ export function App() {
   const stampOf = (index: SetupIndex): number => Math.max(...index.list.map((s) => s.updatedAt))
 
   const runSync = async (): Promise<void> => {
+    // Mid-edit, wait: a pull could reload the open game under the box being typed in. Leaving the field syncs.
+    if (isEditing()) {
+      editPending.current = true
+      return
+    }
     if (syncing.current) {
       syncAgain.current = true
       return
@@ -180,7 +190,8 @@ export function App() {
     try {
       const { index, pulled, dropped } = await syncSetups(setupsRef.current)
       const merged = mergeIndex(setupsRef.current, index, dropped)
-      syncedStamp.current = stampOf(merged)
+      // What the server now has; edits made while this was in flight are newer and still get pushed.
+      syncedStamp.current = stampOf(index)
       saveSetups(merged)
       setSetupsState(merged)
       // The open game changed on the server, or was deleted there: reload it from the browser copy.
@@ -204,9 +215,17 @@ export function App() {
     const onFocus = (): void => {
       if (document.visibilityState === 'visible') void runSync()
     }
+    const onLeaveField = (): void => {
+      if (!editPending.current) return
+      editPending.current = false
+      // focusout fires before focus lands on the next field, so this runs even when tabbing between boxes.
+      void runSync()
+    }
     window.addEventListener('focus', onFocus)
     document.addEventListener('visibilitychange', onFocus)
+    document.addEventListener('focusout', onLeaveField)
     return () => {
+      document.removeEventListener('focusout', onLeaveField)
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', onFocus)
     }
@@ -311,6 +330,16 @@ export function App() {
           </select>
         </label>
       )}
+      {/* Pinned to the bottom on a phone, within thumb reach; a row of the lid on a wide screen. */}
+      {data && (
+        <nav class="tabs" role="tablist" aria-label="Sections">
+          {TABS.map((t) => (
+            <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>
+              {(partyOnly && t.party) || t.label}
+            </button>
+          ))}
+        </nav>
+      )}
     </header>
   )
 
@@ -365,6 +394,8 @@ export function App() {
               onSubmit={(e) => {
                 e.preventDefault()
                 setAccessCode(codeDraft.trim())
+                // Leaving the box runs the sync (see runSync).
+                ;(document.activeElement as HTMLElement | null)?.blur()
                 void runSync()
               }}
             >
@@ -448,8 +479,8 @@ export function App() {
                 roster={roster}
                 team={party}
                 allow={allow}
-                onCaught={(name) => {
-                  if (partyOnly) return join(name)
+                onCaught={(name, replaces) => {
+                  if (partyOnly) return join(name, replaces)
                   const next = addToRoster(data, lookup, roster, team, name)
                   if (!next) return
                   setRoster(next.roster)
@@ -466,7 +497,8 @@ export function App() {
                 level={level}
                 onLevel={setLevel}
                 opponent={opponent}
-                scope={scope}
+                scope={partyOnly ? 'team' : scope}
+                partyOnly={partyOnly}
                 out={outIndex}
                 onOut={setOutIndex}
                 onOpponent={setOpponent}
@@ -497,14 +529,6 @@ export function App() {
         onRoster={setRoster}
         onTeam={setTeam}
       />
-
-      <nav class="tabs" role="tablist" aria-label="Sections">
-        {TABS.map((t) => (
-          <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>
-            {(partyOnly && t.party) || t.label}
-          </button>
-        ))}
-      </nav>
     </div>
   )
 }

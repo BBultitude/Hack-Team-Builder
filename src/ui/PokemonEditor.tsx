@@ -5,6 +5,7 @@ import { MODELLED_ABILITIES } from '../logic/abilities'
 import { type Member, evolve, incomingMultiplier, resolveMember } from '../logic/member'
 import type { Lookup } from '../logic/lookup'
 import { MAX_GEN, inGen, moveNames as movesInGen } from '../logic/setup'
+import { NumberField } from './NumberField'
 import { Suggest } from './Suggest'
 import { Sprite } from './Sprite'
 import { Types } from './Types'
@@ -199,18 +200,14 @@ export function PokemonEditor(props: Props) {
                 {STAT_NAMES.map((name, i) => (
                   <label key={name} class="field">
                     <span>{name}</span>
-                    <input
-                      type="number"
-                      inputMode="numeric"
+                    <NumberField
                       min={1}
                       max={999}
-                      value={String(currentStats[i] ?? 0)}
-                      onInput={(e) => {
-                        const v = e.currentTarget.value
-                        // An emptied box is mid-edit; saving 1 would turn a retyped "100" into "1100".
-                        if (v === '') return
+                      value={currentStats[i] ?? 0}
+                      onChange={(v) => {
+                        if (v === undefined) return
                         const next = [...currentStats]
-                        next[i] = Math.min(Math.max(Math.trunc(Number(v) || 1), 1), 999)
+                        next[i] = v
                         patch({ st: next })
                       }}
                     />

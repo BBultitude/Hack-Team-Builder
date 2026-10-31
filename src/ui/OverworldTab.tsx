@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type { GameData, HackPack, RosterEntry } from '../types'
 import type { Lookup } from '../logic/lookup'
 import { entryFromDex } from '../logic/member'
@@ -189,7 +189,7 @@ export function OverworldTab(props: Props) {
   )
 }
 
-/** Asks which party member a new Pokémon replaces, once the party is full. */
+/** Asks which party member a new Pokémon replaces, once the party is full, over wherever the player is on the page. */
 export function ReplacePicker(props: {
   data: GameData
   party: RosterEntry[]
@@ -197,20 +197,35 @@ export function ReplacePicker(props: {
   onPick: (slot: number) => void
   onCancel: () => void
 }) {
+  const ref = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    ref.current?.showModal()
+  }, [])
+
   return (
-    <div class="card stack" role="group" aria-label="Party is full" style="margin:0 1rem">
-      <p style="margin:0">
-        <strong>Party is full.</strong> Who does {props.name} replace?
-      </p>
-      <div class="row wrap">
-        {props.party.map((e, i) => (
-          <button key={i} onClick={() => props.onPick(i)}>
-            <Sprite gen={props.data.gen} id={props.data.dex[e.d]?.id} size={32} />
-            {e.n}
-          </button>
-        ))}
-        <button onClick={props.onCancel}>Cancel</button>
+    <dialog
+      ref={ref}
+      class="pokemon-modal"
+      aria-labelledby="replace-title"
+      onClose={props.onCancel}
+      // A click on the dialog itself, not its content, is a click on the backdrop.
+      onClick={(e) => {
+        if (e.target === ref.current) ref.current?.close()
+      }}
+    >
+      <div class="pokemon-modal-body stack">
+        <h2 id="replace-title" style="margin:0">Party is full</h2>
+        <p style="margin:0">Who does {props.name} replace?</p>
+        <div class="row wrap">
+          {props.party.map((e, i) => (
+            <button key={i} onClick={() => props.onPick(i)}>
+              <Sprite gen={props.data.gen} id={props.data.dex[e.d]?.id} size={32} />
+              {e.n}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => ref.current?.close()}>Cancel</button>
       </div>
-    </div>
+    </dialog>
   )
 }

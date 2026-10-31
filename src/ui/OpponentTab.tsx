@@ -14,6 +14,7 @@ import {
   rankMembers,
   resolveOpponent,
 } from '../logic/opponent'
+import { NumberField } from './NumberField'
 import { Suggest } from './Suggest'
 import { dexNames, moveNames } from '../logic/setup'
 import { Sprite } from './Sprite'
@@ -26,6 +27,8 @@ interface Props {
   team: number[]
   /** The team's level, which every member is assumed to be at. */
   level: number
+  /** Emerald Rogue: everything owned is the party, so there is no wider pool to rank. */
+  partyOnly?: boolean
   onLevel: (level: number) => void
   opponent: SavedOpponent | null
   scope: RankScope
@@ -68,6 +71,8 @@ export function OpponentTab(props: Props) {
   }
   const opponentMoves = opponent?.mv ?? []
   const allMoves = useMemo(() => moveNames(data), [data])
+  // Open when a trainer pick filled them in; otherwise usually unknown, so tucked away. Only re-decided for a new opponent, so clearing a move mid-edit doesn't snap it shut.
+  const movesKnown = useMemo(() => opponentMoves.some(Boolean), [opponent?.name, opponent?.trainer, opponent?.lv])
 
   const indices = scope === 'team' ? team : roster.map((_, i) => i)
 
@@ -93,8 +98,8 @@ export function OpponentTab(props: Props) {
   const spriteOf = (slot: number): number | undefined => data.dex[members[slot]?.entry.d ?? -1]?.id
 
   return (
-    <div>
-      <div class="card stack">
+    <div class="split">
+      <div class="card stack split-side">
         <h2 style="margin:0">Opponent</h2>
         {props.trainers.length > 0 && (
           <label class="field">
@@ -163,21 +168,17 @@ export function OpponentTab(props: Props) {
             </div>
             <label class="field">
               <span>Its level (optional)</span>
-              <input
-                type="number"
-                inputMode="numeric"
+              <NumberField
+                optional
                 min={1}
                 max={100}
                 placeholder="Same as your team's"
-                value={opponent?.lv === undefined ? '' : String(opponent.lv)}
-                onInput={(e) => {
-                  const v = e.currentTarget.value
-                  patchOpponent({ lv: v === '' ? undefined : Math.min(Math.max(Math.trunc(Number(v) || 1), 1), 100) })
-                }}
+                value={opponent?.lv}
+                onChange={(lv) => patchOpponent({ lv })}
               />
             </label>
-            <div class="field">
-              <span>Its moves (optional)</span>
+            <details class="field" open={movesKnown}>
+              <summary>Its moves (if known)</summary>
               <div class="stat-grid">
                 {[0, 1, 2, 3].map((slot) => {
                   const set = (v: string): void => {
@@ -197,7 +198,7 @@ export function OpponentTab(props: Props) {
                   )
                 })}
               </div>
-            </div>
+            </details>
             <label class="field">
               <span>Ability (optional)</span>
               <Suggest
@@ -219,38 +220,29 @@ export function OpponentTab(props: Props) {
 
         <label class="field">
           <span>Your team's level</span>
-          <input
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={100}
-            value={String(props.level)}
-            onInput={(e) => {
-              const v = e.currentTarget.value
-              // An emptied box is mid-edit, not level 1; saving 1 would turn a retyped "45" into "145".
-              if (v !== '') props.onLevel(Math.min(Math.max(Math.trunc(Number(v) || 1), 1), 100))
-            }}
-          />
+          <NumberField min={1} max={100} value={props.level} onChange={(v) => v !== undefined && props.onLevel(v)} />
           <span class="muted">Every Pokémon you own is assumed to be at this level, so one a level or two behind still counts.</span>
         </label>
 
-        <div class="row">
-          <span class="muted grow">Rank</span>
-          <button
-            aria-pressed={scope === 'team'}
-            class={scope === 'team' ? 'primary' : ''}
-            onClick={() => props.onScope('team')}
-          >
-            My team
-          </button>
-          <button
-            aria-pressed={scope === 'all'}
-            class={scope === 'all' ? 'primary' : ''}
-            onClick={() => props.onScope('all')}
-          >
-            Everything I own
-          </button>
-        </div>
+        {!props.partyOnly && (
+          <div class="row">
+            <span class="muted grow">Rank</span>
+            <button
+              aria-pressed={scope === 'team'}
+              class={scope === 'team' ? 'primary' : ''}
+              onClick={() => props.onScope('team')}
+            >
+              My team
+            </button>
+            <button
+              aria-pressed={scope === 'all'}
+              class={scope === 'all' ? 'primary' : ''}
+              onClick={() => props.onScope('all')}
+            >
+              Everything I own
+            </button>
+          </div>
+        )}
 
         {members.length > 0 && (
           <label class="field">
@@ -273,89 +265,93 @@ export function OpponentTab(props: Props) {
         )}
       </div>
 
-      {!resolved ? (
-        <p class="empty">Pick an opponent to see who handles it best.</p>
-      ) : members.length === 0 ? (
-        <p class="empty">
-          {scope === 'team'
-            ? 'No team selected yet. Build one on the Team tab, or rank everything you own.'
-            : 'You have not added any Pokémon yet.'}
-        </p>
-      ) : (
-        <>
-          {out && best && (
-            <div class="card stack">
-              <h2 class="row" style="margin:0">
-                <Sprite gen={data.gen} id={spriteOf(out.slot)} />
-                <span class="grow">Out: {out.name}</span>
-                <span class="muted">
-                  rank {outRank + 1} of {ranked.length}
-                </span>
-              </h2>
-              <p style="margin:0">
-                <strong>{verdict(out, best, resolved.name)}</strong>
-              </p>
-              {out.deals && out.deals.max > 0 && !out.dealsGuessed && (
-                <p style="margin:0">
-                  Aim with <strong>{out.deals.move.n}</strong>.
-                </p>
-              )}
-              {out.survives && !out.wins && (out.takes?.max ?? 0) >= 50 && (
-                <p class="danger" style="margin:0">
-                  {out.takes!.move.n} takes half its Hit Points or more, so don't stay in long.
-                </p>
-              )}
-              <MatchupDetails data={data} r={out} member={members[out.slot]!} opponent={resolved} />
-            </div>
-          )}
-
-          {best && (
-            <div class="card stack">
-              <h2 class="row" style="margin:0">
-                <Sprite gen={data.gen} id={spriteOf(best.slot)} />
-                Best: {best.name}
-              </h2>
-              <MatchupDetails data={data} r={best} member={members[best.slot]!} opponent={resolved} />
-            </div>
-          )}
-
-          {worst && (
-            <div class="card stack">
-              <h2 class="row" style="margin:0">
-                <Sprite gen={data.gen} id={spriteOf(worst.slot)} />
-                Worst: {worst.name}
-              </h2>
-              <MatchupDetails data={data} r={worst} member={members[worst.slot]!} opponent={resolved} />
-            </div>
-          )}
-
-          <div class="card">
-            <h2>Full order</h2>
-            <div class="stack">
-              {ranked.map((r, i) => (
-                <div key={r.slot} class="member-line">
-                  <span class="rank-badge">{i + 1}.</span>
-                  <Sprite gen={data.gen} id={spriteOf(r.slot)} size={32} />
-                  <span class="grow truncate">
-                    {r.name}
-                    {r === out && <span class="muted"> (out)</span>}
+      <div>
+        {!resolved ? (
+          <p class="empty">Pick an opponent to see who handles it best.</p>
+        ) : members.length === 0 ? (
+          <p class="empty">
+            {props.partyOnly
+              ? 'Your party is empty. Add Pokémon in the Pokédex tab.'
+              : scope === 'team'
+              ? 'No team selected yet. Build one on the Team tab, or rank everything you own.'
+              : 'You have not added any Pokémon yet.'}
+          </p>
+        ) : (
+          <>
+            {out && best && (
+              <div class="card stack">
+                <h2 class="row" style="margin:0">
+                  <Sprite gen={data.gen} id={spriteOf(out.slot)} />
+                  <span class="grow">Out: {out.name}</span>
+                  <span class="muted">
+                    rank {outRank + 1} of {ranked.length}
                   </span>
-                  <Readout r={r} />
-                </div>
-              ))}
+                </h2>
+                <p style="margin:0">
+                  <strong>{verdict(out, best, resolved.name)}</strong>
+                </p>
+                {out.deals && out.deals.max > 0 && !out.dealsGuessed && (
+                  <p style="margin:0">
+                    Aim with <strong>{out.deals.move.n}</strong>.
+                  </p>
+                )}
+                {out.survives && !out.wins && (out.takes?.max ?? 0) >= 50 && (
+                  <p class="danger" style="margin:0">
+                    {out.takes!.move.n} takes half its Hit Points or more, so don't stay in long.
+                  </p>
+                )}
+                <MatchupDetails data={data} r={out} member={members[out.slot]!} opponent={resolved} />
+              </div>
+            )}
+
+            {best && (
+              <div class="card stack">
+                <h2 class="row" style="margin:0">
+                  <Sprite gen={data.gen} id={spriteOf(best.slot)} />
+                  Best: {best.name}
+                </h2>
+                <MatchupDetails data={data} r={best} member={members[best.slot]!} opponent={resolved} />
+              </div>
+            )}
+
+            {worst && (
+              <div class="card stack">
+                <h2 class="row" style="margin:0">
+                  <Sprite gen={data.gen} id={spriteOf(worst.slot)} />
+                  Worst: {worst.name}
+                </h2>
+                <MatchupDetails data={data} r={worst} member={members[worst.slot]!} opponent={resolved} />
+              </div>
+            )}
+
+            <div class="card">
+              <h2>Full order</h2>
+              <div class="stack">
+                {ranked.map((r, i) => (
+                  <div key={r.slot} class="member-line">
+                    <span class="rank-badge">{i + 1}.</span>
+                    <Sprite gen={data.gen} id={spriteOf(r.slot)} size={32} />
+                    <span class="grow truncate">
+                      {r.name}
+                      {r === out && <span class="muted"> (out)</span>}
+                    </span>
+                    <Readout r={r} />
+                  </div>
+                ))}
+              </div>
+              <p class="muted" style="margin:0.6rem 0 0">
+                Sorted by: survives its hardest hit, then wins the exchange (hits to knock out, Speed for
+                ties), then takes longest to knock out. Damage is a share of Hit Points from full.
+                {resolved.moves.length
+                  ? ` Uses ${resolved.name}'s known moves.`
+                  : ` ${resolved.name}'s moves are unknown, so its strongest learnable moves of its own types are assumed.`}
+                {resolved.level === null && ` Its level is assumed to match your team's.`} Your Pokémon are
+                assumed to be level {props.level} and untrained (no EVs, perfect IVs); no critical hits or weather.
+              </p>
             </div>
-            <p class="muted" style="margin:0.6rem 0 0">
-              Sorted by: survives its hardest hit, then wins the exchange (hits to knock out, Speed for
-              ties), then takes longest to knock out. Damage is a share of Hit Points from full.
-              {resolved.moves.length
-                ? ` Uses ${resolved.name}'s known moves.`
-                : ` ${resolved.name}'s moves are unknown, so its strongest learnable moves of its own types are assumed.`}
-              {resolved.level === null && ` Its level is assumed to match your team's.`} Your Pokémon are
-              assumed to be level {props.level} and untrained (no EVs, perfect IVs); no critical hits or weather.
-            </p>
-          </div>
-        </>
-      )}
+          </>
+        )}
+      </div>
     </div>
   )
 }

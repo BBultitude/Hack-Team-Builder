@@ -781,3 +781,43 @@ ol.moves li { margin: 0.15rem 0; }
   flex-shrink: 0;
 }
 .sprite.crisp { image-rendering: pixelated; }
+
+/*
+ * Landscape tablet and desktop: the device widens, the tabs move up into the
+ * lid (a bottom bar eats scarce height in landscape) and cards flow in two
+ * columns. Below this it stays the phone column.
+ */
+@media (min-width: 900px) {
+  #app,
+  .shell-top { max-width: 1100px; }
+  .tabs {
+    position: static;
+    max-width: none;
+    margin-top: 0.7rem;
+    padding: 0;
+    background: none;
+    box-shadow: none;
+  }
+  .tabs::after { content: none; }
+  main { padding: 0 1.5rem 1.5rem; }
+  .party-slot { min-height: 72px; }
+
+  .cards,
+  .split {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 2rem;
+    align-items: start;
+  }
+  /* The tab's intro card, and anything that isn't a card, spans both columns. */
+  .cards > :first-child,
+  .cards > :not(.card) { grid-column: 1 / -1; }
+  .split { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
+  .card:last-of-type { border-bottom: 1px solid var(--border); }
+
+  .dex-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    column-gap: 1.5rem;
+  }
+}

@@ -353,8 +353,15 @@ await step('an Unbound game offers boss teams and rates damage by level', async 
   // Clear and retype like a person: an emptied box must not snap to 1 (which made "45" into "145").
   const teamLevel = page.locator('label:has-text("Your team\'s level") input')
   await teamLevel.fill('')
+  // Wait past the sync status flip: a re-render must not write the old level back into the emptied box.
+  await page.waitForTimeout(1500)
+  if ((await teamLevel.inputValue()) !== '') throw new Error(`emptied box refilled with ${await teamLevel.inputValue()}`)
   await teamLevel.pressSequentially('45')
+  await page.waitForTimeout(1500)
   if ((await teamLevel.inputValue()) !== '45') throw new Error(`retyped level reads ${await teamLevel.inputValue()}`)
+  await teamLevel.fill('150')
+  await teamLevel.blur()
+  if ((await teamLevel.inputValue()) !== '100') throw new Error(`150 should snap to 100 on leaving, got ${await teamLevel.inputValue()}`)
   await teamLevel.fill('20')
   await page.fill('input[placeholder*="Leader, rival"]', 'Champion Jax')
   await page.locator('.suggest-list button:text-is("Champion Jax")').click()
@@ -390,8 +397,10 @@ await step('an Emerald Rogue game tracks the overworld, Day Care and a six-Poké
   }
   for (const n of ['Bulbasaur', 'Charmander', 'Squirtle', 'Pikachu', 'Eevee', 'Abra']) await join(n)
   await join('Mareep')
-  await page.waitForSelector('[role="group"][aria-label="Party is full"]', { timeout: 5000 })
-  await page.locator('[role="group"][aria-label="Party is full"] button:has-text("Pikachu")').click()
+  // A modal over wherever the player is, not a card at the top of the page.
+  const full = 'dialog[open][aria-labelledby="replace-title"]'
+  await page.waitForSelector(full, { timeout: 5000 })
+  await page.locator(`${full} button:has-text("Pikachu")`).click()
   const party = await page.locator('.party-slot:not(.empty)').evaluateAll((els) => els.map((e) => e.title))
   if (party.join(',') !== 'Bulbasaur,Charmander,Squirtle,Mareep,Eevee,Abra') throw new Error(`party: ${party}`)
 
@@ -399,6 +408,15 @@ await step('an Emerald Rogue game tracks the overworld, Day Care and a six-Poké
   if (await page.locator('button:text-is("Auto-build")').count()) throw new Error('Auto-build shown in Rogue')
   await page.click('button[role="tab"]:has-text("Capture Next")')
   await page.waitForSelector('h2:text-is("Capture next")', { timeout: 5000 })
+  if (!(await page.locator('.card p:has-text("Replaces")').count())) throw new Error('Capture next does not say who to replace')
+
+  await page.click('button[role="tab"]:has-text("Opponent")')
+  if (await page.locator('button:text-is("Everything I own")').count()) throw new Error('Everything I own shown in Rogue')
+  await page.fill('input[placeholder*="Search the dex"]', 'Gengar')
+  await page.locator('.suggest-list button:text-is("Gengar")').click()
+  if (await page.locator('details:has(summary:has-text("Its moves")) ').evaluate((d) => d.open)) {
+    throw new Error('unknown opponent moves should start collapsed')
+  }
 })
 
 await step('the Dex header and party stay put while the screen scrolls', async () => {
@@ -432,6 +450,23 @@ await step('no horizontal overflow at 390px', async () => {
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   )
   if (over > 0) throw new Error(`page scrolls ${over}px horizontally`)
+})
+
+await step('on a landscape tablet the tabs sit under the header and cards go two across', async () => {
+  await page.setViewportSize({ width: 1180, height: 820 })
+  await page.click('button[role="tab"]:has-text("Team")')
+  await page.waitForTimeout(200)
+  const box = await page.evaluate(() => ({
+    tabs: document.querySelector('.tabs').getBoundingClientRect(),
+    head: document.querySelector('.shell-top').getBoundingClientRect(),
+    over: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    columns: getComputedStyle(document.querySelector('.cards')).gridTemplateColumns.split(' ').length,
+  }))
+  if (box.tabs.bottom > box.head.bottom + 1) throw new Error(`tabs at ${box.tabs.top}, header ends ${box.head.bottom}`)
+  if (box.over > 0) throw new Error(`page scrolls ${box.over}px horizontally`)
+  if (box.columns !== 2) throw new Error(`${box.columns} card columns`)
+  await page.screenshot({ path: process.env.SHOT_WIDE ?? '/tmp/smoke-wide.png' })
+  await page.setViewportSize({ width: 390, height: 844 })
 })
 
 await step('no console errors or failed requests', async () => {

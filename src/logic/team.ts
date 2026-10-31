@@ -2,6 +2,9 @@ import type { GameData, Move, RosterEntry } from '../types'
 import type { Lookup } from './lookup'
 import { type Member, entryFromDex, hasStab, incomingMultiplier, resolveMember } from './member'
 import { effectiveness } from './typeChart'
+import { STAT } from '../types'
+import { effectiveStat } from './stats'
+import { attackAbility } from './abilities'
 import { inGen } from './setup'
 import { catchSource } from './catching'
 
@@ -138,6 +141,8 @@ function scoreOf(
 export interface Suggestion {
   index: number
   gain: number
+  /** Roster index it should take the place of, when the team is full. */
+  replaces?: number
   /** Currently exposed types it would cover defensively. */
   resists: number[]
   /** Currently uncovered types it would hit super-effectively. */
@@ -181,8 +186,6 @@ const AVOID_MOVES = new Set([
 
 /** Value of hitting one more type super-effectively, in base-power points. */
 const NEW_COVERAGE_VALUE = 40
-/** Damage-class mismatch with the member's role, e.g. a special move on a physical attacker. */
-const OFF_ROLE_FACTOR = 0.6
 
 export interface RecommendedMove {
   move: Move
@@ -191,9 +194,36 @@ export interface RecommendedMove {
   covers: number[]
 }
 
+/** Attack or Sp. Atk with the nature applied, for a move's damage class. */
+export function attackStat(m: Member, move: Move): number {
+  const stat = move.c === 'physical' ? STAT.ATTACK : STAT.SP_ATTACK
+  return effectiveStat(m.stats[stat] ?? 0, stat, m.nature)
+}
+
 /**
- * Four learnable moves per member, picked greedily for power (Same-Type
- * Attack Bonus and role fit applied) plus types the team does not yet hit.
+ * A move's power for this member: base power with the Same-Type Attack Bonus
+ * and ability, scaled by how its attacking stat compares with its best one.
+ * 130 Attack and 60 Sp. Atk puts a special move at under half value.
+ */
+export function effectivePower(m: Member, move: Move): number {
+  const stab = hasStab(m, move.t)
+  const best = Math.max(attackStat(m, { ...move, c: 'physical' }), attackStat(m, { ...move, c: 'special' }))
+  const statFit = best > 0 ? attackStat(m, move) / best : 1
+  return move.p * (stab ? 1.5 : 1) * attackAbility(m.ability, move, stab).factor * statFit
+}
+
+/**
+ * Entered moves the planner leaves in place: status moves (not in the move
+ * data), fixed or variable damage, and anything it doesn't recognise.
+ */
+export function keptMoves(m: Member): string[] {
+  const priced = new Set(m.moves.filter((mv) => mv.p > 0).map((mv) => mv.n.toLowerCase()))
+  return m.entry.mv.map((n) => n.trim()).filter((n) => n && !priced.has(n.toLowerCase()))
+}
+
+/**
+ * Up to four learnable moves per member (fewer when it keeps status moves),
+ * picked greedily for effective power plus types the team does not yet hit.
  * Members are filled in team order and share one coverage set, so later
  * members complement earlier ones. Null for custom Pokemon (no learnset).
  */
@@ -213,15 +243,14 @@ export function recommendMoves(data: GameData, members: readonly Member[]): (Rec
       .filter((mv): mv is Move => !!mv && mv.p > 0 && !AVOID_MOVES.has(mv.n))
 
     const picked: RecommendedMove[] = []
-    while (picked.length < 4) {
+    const slots = 4 - keptMoves(m).length
+    while (picked.length < slots) {
       let best: { rec: RecommendedMove; value: number } | null = null
       for (const move of candidates) {
         if (picked.some((p) => p.move.t === move.t)) continue
         const stab = hasStab(m, move.t)
-        const fits = m.role === 'Mixed' || m.role.toLowerCase() === move.c
         const covers = hits(move).filter((t) => !covered.has(t))
-        const value =
-          move.p * (stab ? 1.5 : 1) * (fits ? 1 : OFF_ROLE_FACTOR) + NEW_COVERAGE_VALUE * covers.length
+        const value = effectivePower(m, move) + NEW_COVERAGE_VALUE * covers.length
         if (!best || value > best.value) best = { rec: { move, stab, covers }, value }
       }
       if (!best) break
@@ -230,6 +259,31 @@ export function recommendMoves(data: GameData, members: readonly Member[]): (Rec
     }
     return picked
   })
+}
+
+/**
+ * Why a recommended move beats one the player entered, in plain words; only
+ * what is actually true. Empty when it is a close call.
+ */
+export function swapReasons(data: GameData, m: Member, old: Move, rec: RecommendedMove): string[] {
+  const out: string[] = []
+  const typeName = (t: number): string => data.chart.types[t] ?? '?'
+  const statName = (mv: Move): string => (mv.c === 'physical' ? 'Attack' : 'Sp. Atk')
+  const now = effectivePower(m, old)
+  const next = effectivePower(m, rec.move)
+  if (next > now * 1.1) out.push(`≈${Math.round(next)} vs ≈${Math.round(now)} effective power`)
+  if (old.c !== rec.move.c && attackStat(m, rec.move) > attackStat(m, old) * 1.15) {
+    out.push(
+      `${old.n} is ${old.c}, but its ${statName(rec.move)} (${Math.round(attackStat(m, rec.move))}) beats its ${statName(old)} (${Math.round(attackStat(m, old))})`,
+    )
+  }
+  if (rec.stab && !hasStab(m, old.t)) out.push(`same-type bonus, which ${old.n} lacks`)
+  const boost = attackAbility(m.ability, rec.move, rec.stab)
+  if (boost.cause && !attackAbility(m.ability, old, hasStab(m, old.t)).cause) out.push(`${boost.cause} boosts it`)
+  const twin = m.moves.find((mv) => mv !== old && mv.t === old.t)
+  if (twin) out.push(`${twin.n} already gives it a ${typeName(old.t)} move`)
+  if (rec.covers.length) out.push(`adds super-effective hits on ${rec.covers.map(typeName).join(', ')} that the team lacks`)
+  return out
 }
 
 export interface LookForTarget {
@@ -242,6 +296,8 @@ export interface LookForTarget {
   /** An egg, gift or trade: no catch needed. */
   gift: boolean
   gain: number
+  /** Roster index it should take the place of, when the team is full. */
+  replaces?: number
   /** Currently exposed types it would cover defensively. */
   resists: number[]
   /** Currently uncovered types it would hit super-effectively. */
@@ -283,9 +339,10 @@ export function lookFor(
     const m = resolveMember(data, lookup, entryFromDex(data, d.n, i))
     const trials = base.length < MAX_TEAM ? [[...base, m]] : base.map((_, s) => base.map((b, j) => (j === s ? m : b)))
     let best: TeamAnalysis | null = null
-    for (const trial of trials) {
-      const a = analyseTeam(data, trial)
-      if (!best || a.score > best.score) best = a
+    let slot = -1
+    for (let s = 0; s < trials.length; s++) {
+      const a = analyseTeam(data, trials[s]!)
+      if (!best || a.score > best.score) [best, slot] = [a, s]
     }
     if (!best) return
     const gain = best.score - baseAnalysis.score
@@ -296,6 +353,7 @@ export function lookFor(
       ...(source.where ? { where: source.where } : {}),
       gift: source.gift,
       gain,
+      ...(trials.length > 1 ? { replaces: baseIdx[slot]! } : {}),
       resists: baseAnalysis.exposed.filter((t) => !best.exposed.includes(t)),
       hits: baseAnalysis.uncovered.filter((t) => best.covered.includes(t)),
     })

@@ -14,8 +14,8 @@ interface Props {
   team: number[]
   /** Emerald Rogue's run rules: only what they allow, every one ball-catchable. */
   allow?: (dexIndex: number) => boolean
-  /** Adds the caught Pokemon by name. */
-  onCaught: (name: string) => void
+  /** Adds the caught Pokemon by name, in place of roster index `replaces` when the team is full. */
+  onCaught: (name: string, replaces?: number) => void
 }
 
 export function LookForTab(props: Props) {
@@ -34,7 +34,7 @@ export function LookForTab(props: Props) {
   }
 
   return (
-    <div>
+    <div class="cards">
       <div class="card">
         <h2>{props.allow ? 'Capture next' : 'Pokémon to look for'}</h2>
         {props.allow ? (
@@ -69,6 +69,14 @@ export function LookForTab(props: Props) {
                 </span>
                 <span class="good lcd" title="Team score gain">+{t.gain.toFixed(1)}</span>
               </div>
+              {t.replaces !== undefined && roster[t.replaces] && (
+                <p style="margin:0.3rem 0 0">
+                  <strong>{props.allow ? 'Replaces' : 'Swap out'}</strong>{' '}
+                  <Sprite gen={data.gen} id={data.dex[roster[t.replaces]!.d]?.id} size={32} />
+                  {roster[t.replaces]!.n}
+                  <span class="muted"> — the swap that helps the whole team most</span>
+                </p>
+              )}
               {t.catchFrom !== t.index && (
                 <p style="margin:0.3rem 0 0">
                   Look for <Sprite gen={data.gen} id={data.dex[t.catchFrom]?.id} size={32} />
@@ -111,7 +119,7 @@ export function LookForTab(props: Props) {
                   </p>
                 </details>
               )}
-              <button style="margin-top:0.5rem" onClick={() => props.onCaught(name(t.catchFrom))}>
+              <button style="margin-top:0.5rem" onClick={() => props.onCaught(name(t.catchFrom), t.replaces)}>
                 {t.gift ? 'I got' : 'I caught'} {name(t.catchFrom)}
               </button>
             </div>

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { RosterEntry } from '../types'
 import { data, lookup, typeIndex, dexIndex } from './testData'
 import { evolutionPath, evolve, incomingMultiplier, resolveMember } from './member'
-import { analyseTeam, autoBuild, lookFor, recommendMoves, suggestAdditions, MAX_TEAM } from './team'
+import { analyseTeam, autoBuild, effectivePower, keptMoves, lookFor, recommendMoves, suggestAdditions, swapReasons, MAX_TEAM } from './team'
 
 const t = typeIndex
 
@@ -187,6 +187,41 @@ describe('recommended moves', () => {
     for (const r of recs[1]!) for (const t of r.covers) expect(first.has(t)).toBe(false)
   })
 
+  const move = (n: string) => data.moves.find((m) => m.n === n)!
+
+  it('leans to the stronger attacking stat, nature included', () => {
+    // Alakazam: 135 Sp. Atk, 50 Attack. Fire Punch and Flamethrower are both off-type.
+    const zam = member(own('Alakazam'))
+    expect(effectivePower(zam, move('Flamethrower'))).toBeGreaterThan(effectivePower(zam, move('Fire Punch')) * 2)
+    const modest = data.natures.findIndex((n) => n.n === 'Modest')
+    expect(effectivePower(member(own('Alakazam', { nt: modest })), move('Fire Punch'))).toBeLessThan(
+      effectivePower(zam, move('Fire Punch')),
+    )
+  })
+
+  it('counts attack-boosting abilities', () => {
+    const plain = member(own('Azumarill'))
+    const huge = member(own('Azumarill', { ab: 'Huge Power' }))
+    expect(effectivePower(huge, move('Waterfall'))).toBe(effectivePower(plain, move('Waterfall')) * 2)
+    expect(effectivePower(huge, move('Surf'))).toBe(effectivePower(plain, move('Surf')))
+    const tech = member(own('Scizor', { ab: 'Technician' }))
+    expect(effectivePower(tech, move('Bullet Punch'))).toBeCloseTo(effectivePower(member(own('Scizor')), move('Bullet Punch')) * 1.5)
+  })
+
+  it('keeps entered status moves and recommends attacks for the other slots', () => {
+    const zard = member(own('Charizard', { mv: ['Swords Dance', 'Flamethrower', '', ''] }))
+    expect(keptMoves(zard)).toEqual(['Swords Dance'])
+    expect(recommendMoves(data, [zard])[0]).toHaveLength(3)
+  })
+
+  it('explains why a recommended move beats an entered one', () => {
+    const zam = member(own('Alakazam', { mv: ['Fire Punch', 'Psychic', '', ''] }))
+    const rec = { move: move('Shadow Ball'), stab: false, covers: [t('Ghost')] }
+    const why = swapReasons(data, zam, move('Fire Punch'), rec).join(' | ')
+    expect(why).toContain('Fire Punch is physical, but its Sp. Atk')
+    expect(why).toContain('super-effective hits on Ghost')
+  })
+
   it('returns null for custom Pokemon, which have no vanilla learnset', () => {
     expect(recommendMoves(data, [member({ ...own('Charizard'), d: -1 })])).toEqual([null])
   })
@@ -210,6 +245,14 @@ describe('look for', () => {
     expect(new Set(out.map((t) => data.dex[t.index]!.fm)).size).toBe(out.length)
     for (let i = 1; i < out.length; i++) expect(out[i - 1]!.gain).toBeGreaterThanOrEqual(out[i]!.gain)
     expect(out.every((t) => t.gain > 0)).toBe(true)
+  })
+
+  it('names who a catch replaces only once the team is full', () => {
+    expect(lookFor(data, lookup, roster, [0, 1, 2], 50).every((t) => t.replaces === undefined)).toBe(true)
+    const six = ['Charizard', 'Gengar', 'Snorlax', 'Pikachu', 'Machamp', 'Alakazam'].map((n) => own(n))
+    const out = lookFor(data, lookup, six, [0, 1, 2, 3, 4, 5], 50)
+    expect(out.length).toBeGreaterThan(0)
+    for (const t of out) expect([0, 1, 2, 3, 4, 5]).toContain(t.replaces)
   })
 
   it('says to catch an easier earlier stage when there is one', () => {
