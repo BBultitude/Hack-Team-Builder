@@ -125,7 +125,7 @@ export async function syncSetups(index: SetupIndex, fetchFn: Fetch = fetch): Pro
     if (local.fresh && loadRaw(local.id) === null) continue
     const body = local.deleted
       ? { name: local.name, gen: local.gen, updatedAt: local.updatedAt, deleted: true }
-      : { name: local.name, gen: local.gen, updatedAt: local.updatedAt, state: loadRaw(local.id) ?? {} }
+      : { name: local.name, gen: local.gen, hack: local.hack, difficulty: local.difficulty, updatedAt: local.updatedAt, state: loadRaw(local.id) ?? {} }
     const sent = await callApi(fetchFn, 'PUT', `/api/setups/${local.id}`, body)
     if (sent.status === 409) {
       // Someone saved a newer copy meanwhile: take theirs.

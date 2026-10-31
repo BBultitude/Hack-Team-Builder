@@ -1,9 +1,11 @@
 import type { GameData, Move, Nature, RosterEntry } from '../types'
-import { STAT } from '../types'
 import type { Lookup } from './lookup'
 import { applyDefensiveAbility, type DefenceResult } from './abilities'
 import { effectiveness } from './typeChart'
-import { effectiveStat, roleOf, type Role } from './stats'
+import { roleOf, type Role } from './stats'
+
+/** Level assumed for Pokemon saved before levels existed. */
+export const DEFAULT_LEVEL = 50
 
 /** A roster entry resolved against the loaded data, ready for scoring. */
 export interface Member {
@@ -24,6 +26,7 @@ export interface Member {
   /** True when attackTypes came from the fallback rather than real moves. */
   assumedFromTypes: boolean
   role: Role
+  level: number
 }
 
 export function resolveMember(data: GameData, lookup: Lookup, entry: RosterEntry): Member {
@@ -55,6 +58,7 @@ export function resolveMember(data: GameData, lookup: Lookup, entry: RosterEntry
     attackTypes: assumedFromTypes ? types : fromMoves,
     assumedFromTypes,
     role: roleOf(stats, nature),
+    level: entry.lv ?? DEFAULT_LEVEL,
   }
 }
 
@@ -66,11 +70,6 @@ export function incomingMultiplier(
 ): DefenceResult {
   const base = effectiveness(data.chart, attackType, member.types)
   return applyDefensiveAbility(base, member.ability, data.chart.types[attackType] ?? '')
-}
-
-/** Speed after the nature is applied. */
-export function effectiveSpeed(member: Member): number {
-  return effectiveStat(member.stats[STAT.SPEED] ?? 0, STAT.SPEED, member.nature)
 }
 
 /** Same-Type Attack Bonus applies when the move shares one of the user's types. */
@@ -90,6 +89,7 @@ export function entryFromDex(data: GameData, name: string, dexIndex: number | un
     mv: ['', '', '', ''],
     st: null,
     d: dexIndex ?? -1,
+    lv: DEFAULT_LEVEL,
   }
 }
 
@@ -102,7 +102,7 @@ export function evolve(data: GameData, entry: RosterEntry, target: number): Rost
   const next = entryFromDex(data, '', target)
   const dex = data.dex[target]
   const keepsAbility = !!dex && [...dex.ab, ...dex.hab].includes(entry.ab)
-  return { ...next, nt: entry.nt, mv: [...entry.mv], ab: keepsAbility ? entry.ab : next.ab }
+  return { ...next, nt: entry.nt, mv: [...entry.mv], ab: keepsAbility ? entry.ab : next.ab, lv: entry.lv ?? DEFAULT_LEVEL }
 }
 
 /** Dex indices from one stage to a later one, both ends included; [to] when unrelated. */

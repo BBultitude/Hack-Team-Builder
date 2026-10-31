@@ -1,4 +1,4 @@
-import type { DexEntry, GameData, Move, RosterEntry } from '../types'
+import type { DexEntry, GameData, HackPack, Move, RosterEntry } from '../types'
 import { evolutionPath } from './member'
 
 /**
@@ -49,6 +49,59 @@ function abilitiesFor(e: DexEntry, gen: number): Pick<DexEntry, 'ab' | 'hab'> {
     ab: [slots[0]!, slots[1]!].filter(Boolean),
     hab: gen >= 5 && slots[2] ? [slots[2]] : [],
   }
+}
+
+/**
+ * Vanilla data with a hack's changes applied: changed species, the forms it
+ * adds (appended, so vanilla indices stay put), and extra level-up moves.
+ * Apply before forSetup; hack values replace the vanilla generation history.
+ */
+export function withHack(data: GameData, pack: HackPack | null): GameData {
+  if (!pack) return data
+  const byName = new Map(data.dex.map((d, i) => [d.n, i]))
+  const moveByName = new Map(data.moves.map((m, i) => [m.n, i]))
+  const dex = [...data.dex]
+  const learnsets = [...data.learnsets]
+  const learnGens = [...data.learnGens]
+
+  for (const [name, change] of Object.entries(pack.dex)) {
+    const { base, ...fields } = change
+    const i = byName.get(name)
+    if (i !== undefined) {
+      const next: DexEntry = { ...dex[i]!, ...fields }
+      if (fields.t) delete next.pt
+      if (fields.ab || fields.hab) delete next.pa
+      dex[i] = next
+      continue
+    }
+    const from = base === undefined ? undefined : byName.get(base)
+    if (from === undefined || !fields.t || !fields.s) continue
+    const b = data.dex[from]!
+    // A form: the base's sprite, family and debut, the hack's types, stats and abilities.
+    dex.push({ n: name, id: b.id, g: b.g, cr: fields.cr ?? b.cr, fm: b.fm, t: fields.t, s: fields.s, ab: fields.ab ?? [], hab: fields.hab ?? [] })
+    learnsets.push(data.learnsets[from] ?? [])
+    learnGens.push(data.learnGens[from] ?? '')
+  }
+
+  for (const [name, moves] of Object.entries(pack.learn ?? {})) {
+    const i = byName.get(name)
+    if (i === undefined) continue
+    const extra = moves.map((m) => moveByName.get(m)).filter((m): m is number => m !== undefined)
+    learnsets[i] = [...(learnsets[i] ?? []), ...extra]
+    // Learnable from the hack's start; forSetup still drops moves newer than the cap.
+    learnGens[i] = (learnGens[i] ?? '') + '1'.repeat(extra.length)
+  }
+
+  const after = new Map(dex.map((d, i) => [d.n, i]))
+  const obtain = pack.obtain
+    ? Object.fromEntries(
+        Object.entries(pack.obtain)
+          .map(([name, where]) => [after.get(name), where] as const)
+          .filter((e): e is readonly [number, string] => e[0] !== undefined),
+      )
+    : undefined
+
+  return { ...data, dex, learnsets, learnGens, ...(obtain ? { obtain } : {}) }
 }
 
 export function forSetup(data: GameData, gen: number): GameData {

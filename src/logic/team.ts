@@ -3,6 +3,7 @@ import type { Lookup } from './lookup'
 import { type Member, entryFromDex, hasStab, incomingMultiplier, resolveMember } from './member'
 import { effectiveness } from './typeChart'
 import { inGen } from './setup'
+import { catchSource } from './catching'
 
 export const MAX_TEAM = 6
 
@@ -24,6 +25,8 @@ export interface TypeExposure {
   score: number
   /** Multiplier against each member, in team order, abilities applied. */
   cells: number[]
+  /** Best multiplier each member's attack options deal into a Pokemon of this type alone, in team order. */
+  hits: number[]
 }
 
 export interface TeamAnalysis {
@@ -60,7 +63,9 @@ export function analyseTeam(data: GameData, members: readonly Member[]): TeamAna
     let resist = 0
     let score = 0
     const cells: number[] = []
+    const hits: number[] = []
     for (const m of members) {
+      hits.push(Math.max(...m.attackTypes.map((a) => data.chart.matrix[a]?.[t] ?? 1)))
       const multiplier = incomingMultiplier(data, m, t).multiplier
       cells.push(multiplier)
       const r = rate(multiplier)
@@ -71,7 +76,7 @@ export function analyseTeam(data: GameData, members: readonly Member[]): TeamAna
     if (weak >= STACKED_WEAKNESS_THRESHOLD && weak > resist) score -= STACKED_WEAKNESS_PENALTY
     if (weak > 0 && resist === 0) score -= EXPOSED_PENALTY
     defensiveScore += score
-    grid.push({ type: t, weak, resist, score, cells })
+    grid.push({ type: t, weak, resist, score, cells, hits })
   }
 
   const coveredSet = new Set<number>()
@@ -232,6 +237,10 @@ export interface LookForTarget {
   index: number
   /** Dex index to actually catch: this one, or an easier earlier stage. */
   catchFrom: number
+  /** Where the hack has it, when known. */
+  where?: string
+  /** An egg, gift or trade: no catch needed. */
+  gift: boolean
   gain: number
   /** Currently exposed types it would cover defensively. */
   resists: number[]
@@ -260,10 +269,15 @@ export function lookFor(
   const owned = new Set(roster.map((e) => data.dex[e.d]?.fm).filter((f) => f !== undefined))
   const bst = (i: number): number => (data.dex[i]?.s ?? []).reduce((a, b) => a + b, 0)
 
+  const families = new Map<number, number[]>()
+  data.dex.forEach((d, i) => families.set(d.fm, [...(families.get(d.fm) ?? []), i]))
+
   const out: LookForTarget[] = []
   data.dex.forEach((d, i) => {
     // Base 1 Hit Points (Shedinja) makes the type score meaningless.
-    if (!d.ok || owned.has(d.fm) || d.s[0] === 1) return
+    if (owned.has(d.fm) || d.s[0] === 1) return
+    const source = catchSource(data, i, families.get(d.fm) ?? [i])
+    if (!source) return
     const m = resolveMember(data, lookup, entryFromDex(data, d.n, i))
     const trials = base.length < MAX_TEAM ? [[...base, m]] : base.map((_, s) => base.map((b, j) => (j === s ? m : b)))
     let best: TeamAnalysis | null = null
@@ -276,7 +290,9 @@ export function lookFor(
     if (gain <= 0) return
     out.push({
       index: i,
-      catchFrom: d.cf ?? i,
+      catchFrom: source.from,
+      ...(source.where ? { where: source.where } : {}),
+      gift: source.gift,
       gain,
       resists: baseAnalysis.exposed.filter((t) => !best.exposed.includes(t)),
       hits: baseAnalysis.uncovered.filter((t) => best.covered.includes(t)),

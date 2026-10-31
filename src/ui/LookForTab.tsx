@@ -37,8 +37,10 @@ export function LookForTab(props: Props) {
         <h2>Pokémon to look for</h2>
         <p class="muted" style="margin:0">
           Species you don't own yet that would most improve {team.length ? 'your team' : 'the best six you own'}.
-          Legendaries, event Pokémon and very rare catches are left out. Where to find them depends on
-          your hack, so this says what to look for, not where.
+          {data.obtain
+            ? ' Only what this hack lets you get, with where to find it.'
+            : ' Legendaries, event Pokémon and very rare catches are left out. Where to find them depends on your hack.'}{' '}
+          Anything an Ultra Ball can't realistically catch (under 10% a throw at 1 HP, asleep) is hidden.
         </p>
       </div>
 
@@ -47,7 +49,7 @@ export function LookForTab(props: Props) {
       ) : (
         targets.map((t) => {
           const dex = data.dex[t.index]!
-          const plan = catchPlan(data, roster, team, t.catchFrom)
+          const plan = t.gift ? null : catchPlan(data, roster, team, t.catchFrom)
           return (
             <div key={t.index} class="card">
               <div class="row">
@@ -75,6 +77,12 @@ export function LookForTab(props: Props) {
                   })}
                 </p>
               )}
+              {t.where && (
+                <p style="margin:0.3rem 0 0">
+                  <strong>Where:</strong> {t.where}
+                </p>
+              )}
+              {t.gift && <p class="muted" style="margin:0.3rem 0 0">Gift, egg or trade: no catch needed.</p>}
               {(t.resists.length > 0 || t.hits.length > 0) && (
                 <p class="muted" style="margin:0.3rem 0 0">
                   {t.resists.length > 0 && `Covers your ${t.resists.map(typeName).join(', ')} weakness. `}
@@ -95,7 +103,7 @@ export function LookForTab(props: Props) {
                 </details>
               )}
               <button style="margin-top:0.5rem" onClick={() => props.onCaught(name(t.catchFrom))}>
-                I caught {name(t.catchFrom)}
+                {t.gift ? 'I got' : 'I caught'} {name(t.catchFrom)}
               </button>
             </div>
           )

@@ -2,7 +2,11 @@ import { describe, it, expect } from 'vitest'
 import type { RosterEntry } from '../types'
 import { data, lookup, dexIndex } from './testData'
 import { resolveMember, entryFromDex, incomingMultiplier } from './member'
-import { adaptRoster, forSetup, inGen } from './setup'
+import { readFileSync } from 'node:fs'
+import type { HackPack } from '../types'
+import { buildLookup } from './lookup'
+import { resolveOpponent } from './opponent'
+import { adaptRoster, forSetup, inGen, withHack } from './setup'
 import { ballsFor, catchPlan } from './catching'
 import { autoBuild, lookFor } from './team'
 import { effectiveness } from './typeChart'
@@ -121,5 +125,80 @@ describe('roster across generations', () => {
 
     const gengar = adaptRoster(data, gen3, [own(data, 'Gengar')])[0]!
     expect(gengar.ab).toBe('Levitate')
+  })
+})
+
+describe('withHack (Unbound pack)', () => {
+  const pack = JSON.parse(readFileSync(new URL('../../data/hacks/unbound.json', import.meta.url), 'utf8')) as HackPack
+  const unbound = withHack(data, pack)
+  const ub = buildLookup(unbound)
+  const entry = (name: string) => unbound.dex[ub.dexByName.get(name.toLowerCase())!]!
+
+  it('leaves vanilla alone without a pack', () => {
+    expect(withHack(data, null)).toBe(data)
+  })
+
+  it("applies the hack's stats and abilities", () => {
+    // Unbound buffs Cresselia's defences and gives Weedle Technician as its hidden ability.
+    expect(entry('Cresselia').s).toEqual([120, 70, 120, 75, 130, 85])
+    expect(entry('Weedle').hab).toEqual(['Technician'])
+  })
+
+  it('adds forms the vanilla dex lacks, keeping vanilla indices', () => {
+    expect(unbound.dex.slice(0, data.dex.length).map((d) => d.n)).toEqual(data.dex.map((d) => d.n))
+    const mega = entry('Garchomp (Mega)')
+    expect(mega.s[1]).toBe(170)
+    expect(mega.id).toBe(dexOf(data, 'Garchomp').id)
+    expect(unbound.learnsets.length).toBe(unbound.dex.length)
+  })
+
+  it('adds level-up moves the hack teaches', () => {
+    const needleArm = ub.moveByName.get('needle arm')!
+    expect(unbound.learnsets[ub.dexByName.get('beedrill')!]).toContain(needleArm)
+    expect(data.learnsets[dexIndex('Beedrill')]).not.toContain(needleArm)
+  })
+
+  it('beats the generation history for changed types', () => {
+    const changed = Object.entries(pack.dex).find(([, c]) => c.t && !c.base)
+    if (!changed) return
+    const [name, change] = changed
+    expect(forSetup(unbound, 8).dex[ub.dexByName.get(name.toLowerCase())!]!.t).toEqual(change.t)
+  })
+
+  it('lists all four difficulties in game order, with Vanilla on the Difficult teams', () => {
+    expect(pack.difficulties!.map((d) => d.label)).toEqual(['Vanilla', 'Difficult', 'Expert', 'Insane'])
+    const vanilla = pack.difficulties!.find((d) => d.id === 'vanilla')!
+    expect(pack.trainers![vanilla.sets]!.find((t) => t.name === 'Leader Mirskle')).toBeDefined()
+  })
+
+  it("keeps Unbound's regional dex order, every name resolvable", () => {
+    expect(pack.regional![0]).toBe('Snorunt')
+    expect(pack.regional!.every((n) => ub.dexByName.has(n.toLowerCase()))).toBe(true)
+  })
+
+  it('maps where-to-find text to dex entries, so Look For can tell what Unbound has', () => {
+    expect(unbound.obtain?.[ub.dexByName.get('caterpie')!]).toMatch(/Grim Woods/)
+    expect(Object.keys(unbound.obtain!).length).toBeGreaterThan(800)
+  })
+
+  it('Look For only offers what Unbound has, with where to find it', () => {
+    const gen8 = forSetup(unbound, 8)
+    const roster = ['Charizard', 'Blastoise'].map((n) => entryFromDex(gen8, n, ub.dexByName.get(n.toLowerCase())))
+    const targets = lookFor(gen8, ub, roster, [0, 1], 40)
+    expect(targets.length).toBeGreaterThan(0)
+    for (const t of targets) {
+      expect(gen8.obtain?.[t.catchFrom]).toBeDefined()
+      expect(t.where).toBe(gen8.obtain![t.catchFrom])
+      if (!t.gift) expect(gen8.dex[t.catchFrom]!.cr).toBeGreaterThan(6)
+    }
+  })
+
+  it('has the Insane boss teams in party order, resolvable as opponents', () => {
+    const mirskle = pack.trainers!.insane!.find((t) => t.name === 'Leader Mirskle')!
+    expect(mirskle.team.map((m) => m.n)).toEqual(['Floette', 'Gloom', 'Weedle', 'Comfey'])
+    const weedle = mirskle.team[2]!
+    const foe = resolveOpponent(unbound, ub, { name: weedle.n, ability: weedle.ab, lv: weedle.lv, mv: weedle.mv })!
+    expect(foe.level).toBe(17)
+    expect(foe.moves.map((m) => m.n)).toContain('Bug Bite')
   })
 })

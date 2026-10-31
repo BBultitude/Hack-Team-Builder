@@ -6,7 +6,10 @@ import naturesUrl from '../../data/natures.json?url'
 import catchUrl from '../../data/catch.json?url'
 import catchGensUrl from '../../data/catchgens.json?url'
 import learnGensUrl from '../../data/learngens.json?url'
-import type { GameData } from '../types'
+import unboundUrl from '../../data/hacks/unbound.json?url'
+import rogueUrl from '../../data/hacks/rogue.json?url'
+import type { GameData, HackPack } from '../types'
+import type { Hack } from '../logic/storage'
 
 /**
  * Vite content-hashes these URLs, so the browser caches them indefinitely
@@ -31,3 +34,8 @@ export async function loadGameData(): Promise<GameData> {
   ])
   return { chart, dex, moves, learnsets, learnGens, natures, catchMoves, catchGens }
 }
+
+const HACK_URLS: Record<Hack, string> = { unbound: unboundUrl, rogue: rogueUrl }
+
+/** Only the active setup's pack is fetched. */
+export const loadHack = (hack: Hack): Promise<HackPack> => json<HackPack>(HACK_URLS[hack])

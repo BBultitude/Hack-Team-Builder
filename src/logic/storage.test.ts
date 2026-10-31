@@ -11,6 +11,7 @@ import {
   saveSetups,
   stateKey,
   SETUP_ID,
+  parseSetupMeta,
   type SavedState,
 } from './storage'
 
@@ -54,6 +55,29 @@ const sample: SavedState = {
   opponent: { name: 'Gengar', ability: 'Levitate' },
   scope: 'all',
 }
+
+describe('setup hack fields', () => {
+  it('keeps a known hack and a word difficulty, and drops anything else', () => {
+    expect(parseSetupMeta({ id: 'a', name: 'U', gen: 8, updatedAt: 1, hack: 'unbound', difficulty: 'insane' })).toMatchObject({ hack: 'unbound', difficulty: 'insane' })
+    const junk = parseSetupMeta({ id: 'a', name: 'U', gen: 8, updatedAt: 1, hack: 'nope', difficulty: '<b>' })!
+    expect('hack' in junk || 'difficulty' in junk).toBe(false)
+  })
+})
+
+describe('levels and opponent details', () => {
+  it('keeps old saves without a level, and clamps bad ones', () => {
+    const entry = sample.roster[0]!
+    const back = round({ ...sample, roster: [entry, { ...entry, lv: 500 }, { ...entry, lv: 37 }] })
+    expect(back.roster.map((e) => e.lv)).toEqual([undefined, 100, 37])
+  })
+
+  it('round-trips a trainer opponent and drops junk', () => {
+    const opponent = { name: 'Garchomp', ability: 'Rough Skin', lv: 61, mv: ['Earthquake'], item: 'Choice Band', nt: 3, ev: [0, 252, 0, 0, 4, 252], iv: [31, 31, 31, 31, 31, 31], trainer: 'Leader X' }
+    expect(round({ ...sample, opponent }).opponent).toEqual(opponent)
+    localStorage.setItem(KEY, JSON.stringify({ v: 1, r: [], o: { name: 'Gengar', ability: '', lv: 'x', ev: [1, 2], nt: 999 } }))
+    expect(load(data, lookup, ID).opponent).toEqual({ name: 'Gengar', ability: '', lv: 50 })
+  })
+})
 
 describe('storage', () => {
   it('returns the empty state when nothing is saved', () => {

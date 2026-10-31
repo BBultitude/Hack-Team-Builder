@@ -9,8 +9,10 @@ import {
   learningTip,
   rankMember,
   rankMembers,
+  resolveOpponent,
   type Opponent,
 } from './opponent'
+import type { SavedOpponent } from './storage'
 
 const t = typeIndex
 
@@ -22,9 +24,8 @@ function own(name: string, over: Partial<RosterEntry> = {}): RosterEntry {
 
 const member = (e: RosterEntry) => resolveMember(data, lookup, e)
 
-function opponentOf(name: string, ability = ''): Opponent {
-  const e = data.dex[dexIndex(name)]!
-  return { name: e.n, types: e.t, stats: e.s, ability }
+function opponentOf(name: string, ability = '', more: Partial<SavedOpponent> = {}): Opponent {
+  return resolveOpponent(data, lookup, { name, ability, ...more })!
 }
 
 describe('offence', () => {
@@ -85,13 +86,50 @@ describe('speed', () => {
 })
 
 describe('ranking', () => {
-  it('puts defence before offence', () => {
-    // Into Gengar: Alakazam takes x2 from Ghost but hits x3 (Psychic x2, STAB).
+  it('ranks a faster one-hit knockout first: it wins before the opponent moves', () => {
+    // Under "least damage taken" Blastoise led here. Survive-then-win puts Alakazam first:
+    // it outspeeds Gengar and Psychic (x2, STAB) knocks it out in one hit.
     const glass = member(own('Alakazam', { mv: ['Psychic', '', '', ''] }))
-    const steady = member(own('Blastoise', { mv: ['Surf', '', '', ''] })) // takes x1, deals x1.5
+    const steady = member(own('Blastoise', { mv: ['Surf', '', '', ''] }))
     const ranked = rankMembers(data, [glass, steady], opponentOf('Gengar'))
-    expect(ranked[0]!.best!.value).toBeLessThan(ranked[1]!.best!.value)
-    expect(ranked.map((r) => r.name)).toEqual(['Blastoise', 'Alakazam'])
+    const alakazam = ranked.find((r) => r.name === 'Alakazam')!
+    expect(alakazam.faster).toBe(true)
+    expect(alakazam.myHits).toBe(1)
+    expect(alakazam.survives && alakazam.wins).toBe(true)
+    expect(ranked[0]!.name).toBe('Alakazam')
+  })
+
+  it('prefers a member that wins the exchange over one that only takes less', () => {
+    // Snorlax Lv 50 walls a Lv 50 Machamp boss far better than a slow, frail attacker would,
+    // but if it cannot win the exchange it still ranks below one that survives and wins.
+    const boss = opponentOf('Machamp', '', { lv: 50, mv: ['Close Combat'] })
+    const wall = member(own('Snorlax', { mv: ['Tackle', '', '', ''], lv: 50 }))
+    const winner = member(own('Alakazam', { mv: ['Psychic', '', '', ''], lv: 70 }))
+    const ranked = rankMembers(data, [wall, winner], boss)
+    const [first, second] = ranked
+    expect(first!.wins).toBe(true)
+    expect(second!.wins).toBe(false)
+    expect(first!.name).toBe('Alakazam')
+  })
+
+  it('counts a Speed tie as losing the exchange', () => {
+    const boss = opponentOf('Jolteon', '', { lv: 50, mv: ['Thunderbolt'] })
+    const mirror = rankMember(data, member(own('Jolteon', { mv: ['Thunderbolt', '', '', ''], lv: 50 })), boss, 0)
+    // A mirror is a Speed tie; it also loses on rolls, as its worst roll is set against the boss's best.
+    expect(mirror.faster).toBeNull()
+    expect(mirror.myHits).toBeGreaterThanOrEqual(mirror.theirHits)
+    expect(mirror.wins).toBe(false)
+  })
+
+  it('warns when a setup boss would get three or more turns', () => {
+    const boss = opponentOf('Dragonite', '', { lv: 60, mv: ['Dragon Dance', 'Outrage'] })
+    expect(boss.setup).toBe('Dragon Dance')
+    const slow = rankMember(data, member(own('Snorlax', { mv: ['Tackle', '', '', ''], lv: 60 })), boss, 0)
+    expect(slow.myHits).toBeGreaterThanOrEqual(3)
+    expect(slow.setupRisk).toBe(true)
+    const quick = rankMember(data, member(own('Mamoswine', { mv: ['Icicle Crash', '', '', ''], lv: 60 })), boss, 0)
+    expect(quick.myHits).toBeLessThanOrEqual(2)
+    expect(quick.setupRisk).toBe(false)
   })
 
   it('sends a member that cannot hurt the opponent last, even if it is immune', () => {

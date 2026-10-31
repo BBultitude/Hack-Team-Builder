@@ -19,6 +19,8 @@ interface Props {
   roster: RosterEntry[]
   team: number[]
   onTeam: (team: number[]) => void
+  /** Opens a roster entry's details. */
+  onOpen: (rosterIndex: number) => void
 }
 
 /** The Best Team tab: the chosen six, how they hold up, and what to teach them. */
@@ -124,7 +126,12 @@ export function TeamTab(props: Props) {
             </div>
           )}
 
-          <DefenceMatrix data={data} members={members} grid={analysis.grid} />
+          <DefenceMatrix
+            data={data}
+            members={members}
+            grid={analysis.grid}
+            onOpen={(i) => props.onOpen(roster.indexOf(members[i]!.entry))}
+          />
 
           <div class="card stack">
             <div>

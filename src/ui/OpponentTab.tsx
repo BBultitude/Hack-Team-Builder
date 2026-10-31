@@ -1,19 +1,21 @@
 import { useMemo, useState } from 'preact/hooks'
-import type { GameData, RosterEntry } from '../types'
+import type { GameData, RosterEntry, Trainer, TrainerMon } from '../types'
 import type { Lookup } from '../logic/lookup'
 import { type Member, resolveMember } from '../logic/member'
-import type { RankScope } from '../logic/storage'
+import type { RankScope, SavedOpponent } from '../logic/storage'
 import {
   type Opponent,
   type Ranking,
+  describeHit,
   describeIncoming,
   describeOffence,
   describeSpeed,
   learningTip,
   rankMembers,
+  resolveOpponent,
 } from '../logic/opponent'
 import { Suggest } from './Suggest'
-import { dexNames } from '../logic/setup'
+import { dexNames, moveNames } from '../logic/setup'
 import { Sprite } from './Sprite'
 import { Types } from './Types'
 
@@ -22,31 +24,47 @@ interface Props {
   lookup: Lookup
   roster: RosterEntry[]
   team: number[]
-  opponent: { name: string; ability: string } | null
+  opponent: SavedOpponent | null
   scope: RankScope
   /** Roster index of the Pokemon currently out; also set from the party bar. */
   out: number | null
   onOut: (rosterIndex: number | null) => void
-  onOpponent: (o: { name: string; ability: string } | null) => void
+  onOpponent: (o: SavedOpponent | null) => void
   onScope: (s: RankScope) => void
+  /** Boss teams for the setup's hack and difficulty; empty without hack data. */
+  trainers: Trainer[]
+}
+
+/** A trainer's Pokemon as the opponent, with everything the hack's docs give. */
+function fromTrainer(data: GameData, trainer: string, mon: TrainerMon): SavedOpponent {
+  const nt = data.natures.findIndex((n) => n.n === mon.nt)
+  return {
+    name: mon.n,
+    ability: mon.ab,
+    lv: mon.lv,
+    mv: mon.mv,
+    ...(mon.it ? { item: mon.it } : {}),
+    ...(nt >= 0 ? { nt } : {}),
+    ev: mon.ev,
+    iv: mon.iv,
+    trainer,
+  }
 }
 
 export function OpponentTab(props: Props) {
   const { data, lookup, roster, team, opponent, scope } = props
   const [abilityDraft, setAbilityDraft] = useState(opponent?.ability ?? '')
+  const [trainerDraft, setTrainerDraft] = useState(opponent?.trainer ?? '')
+  const trainer = props.trainers.find((t) => t.name === trainerDraft)
   const outIndex = props.out
 
-  const opponentIndex = opponent ? lookup.dexByName.get(opponent.name.toLowerCase()) : undefined
-  const opponentEntry = opponentIndex === undefined ? undefined : data.dex[opponentIndex]
-
-  const resolved: Opponent | null = opponentEntry
-    ? {
-        name: opponentEntry.n,
-        types: opponentEntry.t,
-        stats: opponentEntry.s,
-        ability: opponent?.ability ?? '',
-      }
-    : null
+  const resolved: Opponent | null = useMemo(() => resolveOpponent(data, lookup, opponent), [data, lookup, opponent])
+  const opponentEntry = resolved ? data.dex[resolved.d] : undefined
+  const patchOpponent = (fields: Partial<SavedOpponent>): void => {
+    if (opponent) props.onOpponent({ ...opponent, ...fields })
+  }
+  const opponentMoves = opponent?.mv ?? []
+  const allMoves = useMemo(() => moveNames(data), [data])
 
   const indices = scope === 'team' ? team : roster.map((_, i) => i)
 
@@ -61,7 +79,7 @@ export function OpponentTab(props: Props) {
 
   const ranked = useMemo(
     () => (resolved ? rankMembers(data, members, resolved) : []),
-    [data, members, resolved?.name, resolved?.ability],
+    [data, members, resolved],
   )
 
   const best = ranked[0]
@@ -69,19 +87,54 @@ export function OpponentTab(props: Props) {
   const outRank = outIndex === null ? -1 : ranked.findIndex((r) => indices[r.slot] === outIndex)
   const out = ranked[outRank]
 
-  const typeName = (i: number): string => data.chart.types[i] ?? '?'
   const spriteOf = (slot: number): number | undefined => data.dex[members[slot]?.entry.d ?? -1]?.id
 
   return (
     <div>
       <div class="card stack">
         <h2 style="margin:0">Opponent</h2>
+        {props.trainers.length > 0 && (
+          <label class="field">
+            <span>Trainer</span>
+            <Suggest
+              value={trainerDraft}
+              placeholder="Leader, rival, boss…"
+              options={props.trainers.map((t) => t.name)}
+              onInput={setTrainerDraft}
+              onPick={setTrainerDraft}
+            />
+          </label>
+        )}
+        {trainer && (
+          <div class="row wrap" role="group" aria-label={`${trainer.name}'s team`}>
+            {trainer.team.map((mon, i) => {
+              const picked = opponent?.trainer === trainer.name && opponent.name === mon.n && opponent.lv === mon.lv
+              return (
+                <button
+                  key={i}
+                  class={picked ? 'primary' : ''}
+                  aria-pressed={picked}
+                  title={`${mon.n}, level ${mon.lv}`}
+                  aria-label={`${mon.n}, level ${mon.lv}`}
+                  onClick={() => {
+                    setAbilityDraft(mon.ab)
+                    props.onOpponent(fromTrainer(data, trainer.name, mon))
+                  }}
+                >
+                  <Sprite gen={data.gen} id={data.dex[lookup.dexByName.get(mon.n.toLowerCase()) ?? -1]?.id} size={40} />
+                  <span class="lcd">{mon.lv}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
         <Suggest
           value={opponent?.name ?? ''}
-          placeholder="Search the dex"
+          placeholder={props.trainers.length ? "Or search the dex" : "Search the dex"}
           options={dexNames(data)}
           onPick={(name) => {
             setAbilityDraft('')
+            setTrainerDraft('')
             props.onOpponent({ name, ability: '' })
           }}
         />
@@ -91,12 +144,55 @@ export function OpponentTab(props: Props) {
             <div class="row" style="gap:0.75rem">
               <Sprite gen={data.gen} id={opponentEntry.id} size={96} />
               <div class="stack">
+                <strong>
+                  {opponent?.trainer ? `${opponent.trainer}'s ` : ''}
+                  {opponentEntry.n}
+                  {resolved?.level !== null && resolved?.level !== undefined && `, level ${resolved.level}`}
+                </strong>
                 <div>
                   <Types data={data} types={opponentEntry.t} />
                 </div>
                 <div class="muted">
                   Base Speed <span class="lcd">{opponentEntry.s[5]}</span>
+                  {opponent?.item && <> · holds {opponent.item}</>}
                 </div>
+              </div>
+            </div>
+            <label class="field">
+              <span>Level (optional)</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={100}
+                placeholder="Same as each of yours"
+                value={opponent?.lv === undefined ? '' : String(opponent.lv)}
+                onInput={(e) => {
+                  const v = e.currentTarget.value
+                  patchOpponent({ lv: v === '' ? undefined : Math.min(Math.max(Math.trunc(Number(v) || 1), 1), 100) })
+                }}
+              />
+            </label>
+            <div class="field">
+              <span>Its moves (optional)</span>
+              <div class="stat-grid">
+                {[0, 1, 2, 3].map((slot) => {
+                  const set = (v: string): void => {
+                    const next = [0, 1, 2, 3].map((i) => opponentMoves[i] ?? '')
+                    next[slot] = v
+                    patchOpponent({ mv: next })
+                  }
+                  return (
+                    <Suggest
+                      key={slot}
+                      value={opponentMoves[slot] ?? ''}
+                      placeholder={`Move ${slot + 1}`}
+                      options={allMoves}
+                      onInput={set}
+                      onPick={set}
+                    />
+                  )
+                })}
               </div>
             </div>
             <label class="field">
@@ -107,11 +203,11 @@ export function OpponentTab(props: Props) {
                 options={[...opponentEntry.ab, ...opponentEntry.hab]}
                 onInput={(v) => {
                   setAbilityDraft(v)
-                  props.onOpponent({ name: opponentEntry.n, ability: v })
+                  patchOpponent({ ability: v })
                 }}
                 onPick={(v) => {
                   setAbilityDraft(v)
-                  props.onOpponent({ name: opponentEntry.n, ability: v })
+                  patchOpponent({ ability: v })
                 }}
               />
             </label>
@@ -179,11 +275,14 @@ export function OpponentTab(props: Props) {
               <p style="margin:0">
                 <strong>{verdict(out, best, resolved.name)}</strong>
               </p>
-              {out.best && out.best.value > 0 && usingMoves(members[out.slot]!, out.best.attackType)}
-              {out.worstIncoming && out.worstIncoming.multiplier >= 2 && (
+              {out.deals && out.deals.max > 0 && !out.dealsGuessed && (
+                <p style="margin:0">
+                  Aim with <strong>{out.deals.move.n}</strong>.
+                </p>
+              )}
+              {out.survives && !out.wins && (out.takes?.max ?? 0) >= 50 && (
                 <p class="danger" style="margin:0">
-                  Watch out for {typeName(out.worstIncoming.attackType)} attacks: they hit you hard, so
-                  don't stay in long.
+                  {out.takes!.move.n} takes half its Hit Points or more, so don't stay in long.
                 </p>
               )}
               <MatchupDetails data={data} r={out} member={members[out.slot]!} opponent={resolved} />
@@ -226,8 +325,13 @@ export function OpponentTab(props: Props) {
               ))}
             </div>
             <p class="muted" style="margin:0.6rem 0 0">
-              Sorted by least damage taken, then most damage dealt. Assumes {resolved.name} attacks
-              only with moves of its own types.
+              Sorted by: survives its hardest hit, then wins the exchange (hits to knock out, Speed for
+              ties), then takes longest to knock out. Damage is a share of Hit Points from full.
+              {resolved.moves.length
+                ? ` Uses ${resolved.name}'s known moves.`
+                : ` ${resolved.name}'s moves are unknown, so its strongest learnable moves of its own types are assumed.`}
+              {resolved.level === null && ` Its level is assumed to match each of yours.`} Your Pokémon are
+              assumed untrained (no EVs, perfect IVs); no critical hits or weather.
             </p>
           </div>
         </>
@@ -236,22 +340,21 @@ export function OpponentTab(props: Props) {
   )
 }
 
+const hits = (n: number): string => (n === 1 ? 'one hit' : `${n} hits`)
+
 function verdict(out: Ranking, best: Ranking, opponentName: string): string {
-  if (!out.best || out.best.value === 0) return `Nothing it knows hurts ${opponentName}. Switch out.`
-  if (out === best) return 'Best pick here. Stay in.'
-  const takes = (r: Ranking): number => r.worstIncoming?.multiplier ?? 1
-  return takes(best) < takes(out) ? `Switch to ${best.name} if you can.` : 'Fine to stay in.'
+  if (out.myHits === Infinity) return `Nothing it knows hurts ${opponentName}. Switch out.`
+  const swap = out === best ? '' : ` Switch to ${best.name} if you can.`
+  if (!out.survives) return `It knocks ${out.name} out in one hit.${swap || ' Nothing you have does better.'}`
+  if (out.wins) return `Wins this: knocks it out in ${hits(out.myHits)} before it can.${out === best ? ' Stay in.' : ''}`
+  return `Survives a hit but loses the exchange.${swap}`
 }
 
-/** "Aim with Earthquake, Bulldoze." for the known moves of its best attack type. */
-function usingMoves(member: Member, attackType: number) {
-  const names = member.moves.filter((m) => m.t === attackType).map((m) => m.n)
-  if (!names.length) return null
-  return (
-    <p style="margin:0">
-      Aim with <strong>{names.join(', ')}</strong>.
-    </p>
-  )
+/** "Knocks it out in 2 hits; it needs 3." */
+function exchange(r: Ranking): string {
+  const mine = r.myHits === Infinity ? "Can't knock it out" : `Knocks it out in ${hits(r.myHits)}`
+  const theirs = r.theirHits === Infinity ? "it can't hurt you" : `it needs ${hits(r.theirHits)}`
+  return `${mine}; ${theirs}.`
 }
 
 function MatchupDetails(props: { data: GameData; r: Ranking; member: Member; opponent: Opponent }) {
@@ -260,7 +363,30 @@ function MatchupDetails(props: { data: GameData; r: Ranking; member: Member; opp
   const tip = learningTip(data, member, opponent)
   return (
     <>
+      {opponent.setup && r.setupRisk && (
+        <p class="danger" style="margin:0">
+          It has {opponent.setup}: finish it within two hits or it snowballs.
+        </p>
+      )}
       <ul style="margin:0;padding-left:1.1rem">
+        <li>{exchange(r)}</li>
+        {r.takes && (
+          <li class={r.ohkoRisk ? 'danger' : ''}>
+            Takes {describeHit(r.takes)}
+            {r.ohkoRisk && ' — can be knocked out in one hit'}
+          </li>
+        )}
+        {r.coverage && (
+          <li class="danger">
+            Could also know {describeHit(r.coverage)} — coverage outside its own types
+          </li>
+        )}
+        {r.deals && (
+          <li>
+            Deals {describeHit(r.deals)}
+            {r.dealsGuessed && ' — guessed, no moves entered'}
+          </li>
+        )}
         {r.best && <li>{describeOffence(data, r.best, opponent.name)}</li>}
         {r.worstIncoming && <li>{describeIncoming(data, r.worstIncoming, opponent.name)}</li>}
         <li>{describeSpeed(r, opponent.name)}</li>
@@ -279,26 +405,30 @@ function MatchupDetails(props: { data: GameData; r: Ranking; member: Member; opp
         <p style="margin:0">
           <strong>Tip:</strong> {r.name} could learn <strong>{tip.move.n}</strong> (
           {typeName(tip.move.t)}, power {tip.move.p}
-          {tip.stab ? ', Same-Type Attack Bonus' : ''}) for a harder hit than anything it
-          currently knows.
+          {tip.stab ? ', Same-Type Attack Bonus' : ''}): up to {tip.value}%
+          {tip.currentValue > 0 ? ` instead of ${tip.currentValue}%` : ''}.
         </p>
       )}
     </>
   )
 }
 
-/** "takes ×2  deals ×3" in the Dex's digital face, red when it hurts and blue when it's safe. */
+/** "takes 45% deals 80%" (top rolls) in the Dex's digital face; "KO" when one hit can knock it out. */
 function Readout({ r }: { r: Ranking }) {
-  const takes = r.worstIncoming?.multiplier ?? 1
-  const deals = r.best?.value ?? 0
+  const takes = Math.round(r.takes?.max ?? 0)
+  const deals = Math.round(r.deals?.max ?? 0)
   return (
-    <span class="readout" aria-label={`takes ${takes} times, deals ${deals} times`}>
-      <span class={takes >= 2 ? 'bad' : takes <= 0.5 ? 'safe' : ''}>
-        takes <span class="lcd">×{takes}</span>
+    <span
+      class="readout"
+      aria-label={`${r.ohkoRisk ? 'can be knocked out in one hit' : `takes up to ${takes}%`}, deals up to ${deals}%, ${r.wins ? 'wins' : 'loses'} the exchange`}
+    >
+      <span class={r.ohkoRisk ? 'bad' : takes <= 25 ? 'safe' : ''}>
+        takes <span class="lcd">{r.ohkoRisk ? 'KO' : `${takes}%`}</span>
       </span>
-      <span class={deals === 0 ? 'bad' : ''}>
-        deals <span class="lcd">×{deals}</span>
+      <span class={deals === 0 ? 'bad' : deals >= 100 ? 'safe' : ''}>
+        deals <span class="lcd">{deals}%</span>
       </span>
+      <span class={r.wins ? 'safe' : 'bad'}>{r.wins ? 'wins' : 'loses'}</span>
     </span>
   )
 }

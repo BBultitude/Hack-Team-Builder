@@ -2,7 +2,8 @@ import { useState } from 'preact/hooks'
 import type { GameData, RosterEntry } from '../types'
 import { STAT_NAMES } from '../types'
 import { MODELLED_ABILITIES } from '../logic/abilities'
-import { evolve } from '../logic/member'
+import { DEFAULT_LEVEL, type Member, evolve, incomingMultiplier, resolveMember } from '../logic/member'
+import type { Lookup } from '../logic/lookup'
 import { MAX_GEN, inGen, moveNames as movesInGen } from '../logic/setup'
 import { Suggest } from './Suggest'
 import { Sprite } from './Sprite'
@@ -10,9 +11,8 @@ import { Types } from './Types'
 
 interface Props {
   data: GameData
+  lookup: Lookup
   entry: RosterEntry
-  open: boolean
-  onToggle: () => void
   onChange: (next: RosterEntry) => void
   onRemove: () => void
   inTeam: boolean
@@ -23,7 +23,7 @@ interface Props {
 const NONE = -1
 
 export function PokemonEditor(props: Props) {
-  const { data, entry, onChange } = props
+  const { data, lookup, entry, onChange } = props
   const vanilla = entry.d >= 0 ? data.dex[entry.d] : undefined
   const [confirmRemove, setConfirmRemove] = useState(false)
 
@@ -39,28 +39,18 @@ export function PokemonEditor(props: Props) {
     entry.d >= 0 ? (data.learnsets[entry.d] ?? []).map((i) => data.moves[i]?.n ?? '') : [],
   )
 
+  const member = resolveMember(data, lookup, entry)
   const statsModified = entry.st !== null
   const currentStats = entry.st ?? vanilla?.s ?? [0, 0, 0, 0, 0, 0]
 
   return (
-    <div class="card">
+    <div>
       <div class="row">
-        <button
-          class="editor-head grow"
-          onClick={() => {
-            // A half-finished removal never survives closing the card.
-            setConfirmRemove(false)
-            props.onToggle()
-          }}
-          aria-expanded={props.open}
-        >
-          <span aria-hidden="true">{props.open ? '▾' : '▸'}</span>
-          <Sprite gen={data.gen} id={vanilla?.id} size={56} />
-          <span class="grow" style="min-width:0">
-            <strong class="truncate" style="display:block">{entry.n}</strong>
-            <Types data={data} types={entry.b >= 0 ? [entry.a, entry.b] : [entry.a]} />
-          </span>
-        </button>
+        <Sprite gen={data.gen} id={vanilla?.id} size={72} />
+        <span class="grow" style="min-width:0">
+          <h2 id="pokemon-modal-title" class="truncate" style="margin:0">{entry.n}</h2>
+          <Types data={data} types={entry.b >= 0 ? [entry.a, entry.b] : [entry.a]} />
+        </span>
         <button
           class={props.inTeam ? 'primary' : ''}
           onClick={props.onToggleTeam}
@@ -91,157 +81,196 @@ export function PokemonEditor(props: Props) {
         </p>
       )}
 
-      {props.open && (
-        <div class="editor-body stack">
-          {(data.gen ?? MAX_GEN) >= 3 && (
-            <label class="field">
-              <span>Ability</span>
-              <Suggest
-                value={entry.ab}
-                placeholder="Ability"
-                options={abilityOptions}
-                onInput={(v) => patch({ ab: v })}
-                onPick={(v) => patch({ ab: v })}
-              />
-            </label>
-          )}
+      <Matchups data={data} member={member} />
 
+      <div class="editor-body stack">
+        {(data.gen ?? MAX_GEN) >= 3 && (
           <label class="field">
-            <span>Nature</span>
-            <select
-              value={String(entry.nt)}
-              onChange={(e) => patch({ nt: Number(e.currentTarget.value) })}
-            >
-              {data.natures.map((n, i) => (
-                <option key={n.n} value={String(i)}>
-                  {n.n}
-                  {n.up === null
-                    ? ' (neutral)'
-                    : ` (+${STAT_NAMES[n.up]}, -${STAT_NAMES[n.down ?? 0]})`}
-                </option>
-              ))}
-            </select>
+            <span>Ability</span>
+            <Suggest
+              value={entry.ab}
+              placeholder="Ability"
+              options={abilityOptions}
+              onInput={(v) => patch({ ab: v })}
+              onPick={(v) => patch({ ab: v })}
+            />
           </label>
+        )}
 
-          {vanilla?.ev && (
-            <div class="row wrap">
-              <span class="muted" style="flex-basis:100%">
-                Evolved it? Tap to update — nature and moves carry over. Methods are vanilla; hacks
-                often swap trade evolutions for items or levels.
-              </span>
-              {vanilla.ev.map((target) => (
-                <button key={target} onClick={() => onChange(evolve(data, entry, target))}>
-                  Evolve → {data.dex[target]?.n}
-                </button>
-              ))}
-            </div>
-          )}
+        <label class="field">
+          <span>Level</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={100}
+            value={String(entry.lv ?? DEFAULT_LEVEL)}
+            onInput={(e) => patch({ lv: Math.min(Math.max(Math.trunc(Number(e.currentTarget.value) || 1), 1), 100) })}
+          />
+        </label>
 
-          <details>
-            <summary>Hack changes (types, moves, base stats)</summary>
-            <div class="stack" style="margin-top:0.6rem">
-              <div class="row">
-                <label class="field grow">
-                  <span>Primary type</span>
-                  <select
-                    value={String(entry.a)}
-                    onChange={(e) => patch({ a: Number(e.currentTarget.value) })}
-                  >
-                    {data.chart.types.map((n, i) => (
-                      <option key={n} value={String(i)}>{n}</option>
-                    ))}
-                  </select>
-                </label>
-                <label class="field grow">
-                  <span>Secondary type</span>
-                  <select
-                    value={String(entry.b)}
-                    onChange={(e) => patch({ b: Number(e.currentTarget.value) })}
-                  >
-                    <option value={String(NONE)}>None</option>
-                    {data.chart.types.map((n, i) => (
-                      <option key={n} value={String(i)}>{n}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+        <label class="field">
+          <span>Nature</span>
+          <select
+            value={String(entry.nt)}
+            onChange={(e) => patch({ nt: Number(e.currentTarget.value) })}
+          >
+            {data.natures.map((n, i) => (
+              <option key={n.n} value={String(i)}>
+                {n.n}
+                {n.up === null
+                  ? ' (neutral)'
+                  : ` (+${STAT_NAMES[n.up]}, -${STAT_NAMES[n.down ?? 0]})`}
+              </option>
+            ))}
+          </select>
+        </label>
 
-              <div class="field">
-                <span>Moves</span>
-                <div class="stack">
-                  {entry.mv.map((mv, slot) => (
-                    <div key={slot}>
-                      <Suggest
-                        value={mv}
-                        placeholder={`Move ${slot + 1}`}
-                        options={moveNames}
-                        onInput={(v) => {
-                          const next = [...entry.mv]
-                          next[slot] = v
-                          patch({ mv: next })
-                        }}
-                        onPick={(v) => {
-                          const next = [...entry.mv]
-                          next[slot] = v
-                          patch({ mv: next })
-                        }}
-                      />
-                      {mv && entry.d >= 0 && !learnable.has(mv) && (
-                        <p class="muted danger" style="margin:0.2rem 0 0">
-                          Not in the vanilla learnset — fine if your hack changed it.
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div class="field">
-                <span>
-                  Base stats
-                  {statsModified && <strong class="danger"> — modified from vanilla</strong>}
-                </span>
-                <div class="stat-grid">
-                  {STAT_NAMES.map((name, i) => (
-                    <label key={name} class="field">
-                      <span>{name}</span>
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        min={1}
-                        max={999}
-                        value={String(currentStats[i] ?? 0)}
-                        onInput={(e) => {
-                          const next = [...currentStats]
-                          next[i] = Math.max(1, Number(e.currentTarget.value) || 1)
-                          patch({ st: next })
-                        }}
-                      />
-                    </label>
-                  ))}
-                </div>
-                {statsModified && vanilla && (
-                  <button class="link" style="margin-top:0.5rem" onClick={() => patch({ st: null })}>
-                    Reset to vanilla
-                  </button>
-                )}
-              </div>
-            </div>
-          </details>
-
-          <div class="remove-row">
-            {confirmRemove ? (
-              <div class="row wrap">
-                <span class="grow">Remove {entry.n}?</span>
-                <button class="danger" onClick={props.onRemove}>Yes, remove</button>
-                <button onClick={() => setConfirmRemove(false)}>Cancel</button>
-              </div>
-            ) : (
-              <button class="danger" onClick={() => setConfirmRemove(true)}>Remove {entry.n}</button>
-            )}
+        {vanilla?.ev && (
+          <div class="row wrap">
+            <span class="muted" style="flex-basis:100%">
+              Evolved it? Tap to update — nature and moves carry over. Methods are vanilla; hacks
+              often swap trade evolutions for items or levels.
+            </span>
+            {vanilla.ev.map((target) => (
+              <button key={target} onClick={() => onChange(evolve(data, entry, target))}>
+                Evolve → {data.dex[target]?.n}
+              </button>
+            ))}
           </div>
+        )}
+
+        <details>
+          <summary>Hack changes (types, moves, base stats)</summary>
+          <div class="stack" style="margin-top:0.6rem">
+            <div class="row">
+              <label class="field grow">
+                <span>Primary type</span>
+                <select
+                  value={String(entry.a)}
+                  onChange={(e) => patch({ a: Number(e.currentTarget.value) })}
+                >
+                  {data.chart.types.map((n, i) => (
+                    <option key={n} value={String(i)}>{n}</option>
+                  ))}
+                </select>
+              </label>
+              <label class="field grow">
+                <span>Secondary type</span>
+                <select
+                  value={String(entry.b)}
+                  onChange={(e) => patch({ b: Number(e.currentTarget.value) })}
+                >
+                  <option value={String(NONE)}>None</option>
+                  {data.chart.types.map((n, i) => (
+                    <option key={n} value={String(i)}>{n}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div class="field">
+              <span>Moves</span>
+              <div class="stack">
+                {entry.mv.map((mv, slot) => (
+                  <div key={slot}>
+                    <Suggest
+                      value={mv}
+                      placeholder={`Move ${slot + 1}`}
+                      options={moveNames}
+                      onInput={(v) => {
+                        const next = [...entry.mv]
+                        next[slot] = v
+                        patch({ mv: next })
+                      }}
+                      onPick={(v) => {
+                        const next = [...entry.mv]
+                        next[slot] = v
+                        patch({ mv: next })
+                      }}
+                    />
+                    {mv && entry.d >= 0 && !learnable.has(mv) && (
+                      <p class="muted danger" style="margin:0.2rem 0 0">
+                        Not in the vanilla learnset — fine if your hack changed it.
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div class="field">
+              <span>
+                Base stats
+                {statsModified && <strong class="danger"> — modified from vanilla</strong>}
+              </span>
+              <div class="stat-grid">
+                {STAT_NAMES.map((name, i) => (
+                  <label key={name} class="field">
+                    <span>{name}</span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={999}
+                      value={String(currentStats[i] ?? 0)}
+                      onInput={(e) => {
+                        const next = [...currentStats]
+                        next[i] = Math.max(1, Number(e.currentTarget.value) || 1)
+                        patch({ st: next })
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
+              {statsModified && vanilla && (
+                <button class="link" style="margin-top:0.5rem" onClick={() => patch({ st: null })}>
+                  Reset to vanilla
+                </button>
+              )}
+            </div>
+          </div>
+        </details>
+
+        <div class="remove-row">
+          {confirmRemove ? (
+            <div class="row wrap">
+              <span class="grow">Remove {entry.n}?</span>
+              <button class="danger" onClick={props.onRemove}>Yes, remove</button>
+              <button onClick={() => setConfirmRemove(false)}>Cancel</button>
+            </div>
+          ) : (
+            <button class="danger" onClick={() => setConfirmRemove(true)}>Remove {entry.n}</button>
+          )}
         </div>
-      )}
+      </div>
     </div>
+  )
+}
+
+/** What hurts this Pokémon and what it hurts, as type chips: the per-Pokémon view of the Best Team grid. */
+function Matchups({ data, member }: { data: GameData; member: Member }) {
+  const all = data.chart.types.map((_, t) => t)
+  const taken = all.map((t) => incomingMultiplier(data, member, t).multiplier)
+  const groups: [string, number[], boolean][] = [
+    ['Weak to', all.filter((t) => taken[t]! > 1), true],
+    ['Resists', all.filter((t) => taken[t]! > 0 && taken[t]! < 1), false],
+    ['Immune to', all.filter((t) => taken[t] === 0), false],
+    ['Hits hard', all.filter((t) => member.attackTypes.some((a) => (data.chart.matrix[a]?.[t] ?? 1) > 1)), false],
+  ]
+  return (
+    <dl class="matchups">
+      {groups
+        .filter(([, types]) => types.length)
+        .map(([label, types, weak]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>
+              <Types data={data} types={types} weak={weak} />
+            </dd>
+          </div>
+        ))}
+      {member.assumedFromTypes && <p class="muted" style="margin:0">No moves entered, so Hits hard uses its own types.</p>}
+    </dl>
   )
 }

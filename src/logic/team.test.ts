@@ -306,3 +306,15 @@ describe('auto-build', () => {
     expect(scoreOf(chosen)).toBeGreaterThanOrEqual(scoreOf(naive))
   })
 })
+
+describe('the Hits view data', () => {
+  it("gives each member's best multiplier into each single type", () => {
+    const blastoise = resolveMember(data, lookup, own('Blastoise', { mv: ['Surf', '', '', ''] }))
+    const snorlax = resolveMember(data, lookup, own('Snorlax', { mv: ['Body Slam', 'Earthquake', '', ''] }))
+    const grid = analyseTeam(data, [blastoise, snorlax]).grid
+    const row = (name: string) => grid.find((g) => g.type === t(name))!
+    expect(row('Fire').hits[0]).toBe(2) // Water into Fire
+    expect(row('Ghost').hits[1]).toBe(1) // Normal is 0, Ground is 1: the best counts
+    expect(row('Electric').hits[1]).toBe(2) // Ground into Electric
+  })
+})

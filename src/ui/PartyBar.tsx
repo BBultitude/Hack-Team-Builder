@@ -2,7 +2,8 @@ import type { GameData, RosterEntry } from '../types'
 import type { Lookup } from '../logic/lookup'
 import { resolveMember } from '../logic/member'
 import { MAX_TEAM } from '../logic/team'
-import { rankMember } from '../logic/opponent'
+import { rankMember, resolveOpponent } from '../logic/opponent'
+import type { SavedOpponent } from '../logic/storage'
 import { Sprite } from './Sprite'
 
 interface Props {
@@ -11,24 +12,22 @@ interface Props {
   roster: RosterEntry[]
   team: number[]
   /** Set on the Opponent tab: each slot then shows how hard the opponent hits it. */
-  opponent: { name: string; ability: string } | null
+  opponent: SavedOpponent | null
   /** Roster index currently out against the opponent. */
   out: number | null
   onPick: (rosterIndex: number) => void
   onEmpty: () => void
 }
 
-/** "x2" for the damage taken, with a tone: bad at x2 or more, safe at x0.5 or less. */
-function mark(taken: number): { text: string; tone: string } {
-  const text = taken === 0.5 ? '½' : taken === 0.25 ? '¼' : String(taken)
-  return { text: `×${text}`, tone: taken >= 2 ? 'bad' : taken <= 0.5 ? 'safe' : 'even' }
+/** "45%" of Hit Points the opponent's hardest hit takes: bad when it can knock out, safe at a quarter or less. */
+function mark(taken: number, ohko: boolean): { text: string; tone: string } {
+  return { text: ohko ? 'KO' : `${Math.round(taken)}%`, tone: ohko ? 'bad' : taken <= 25 ? 'safe' : 'even' }
 }
 
 /** The team's six slots, always in view, like the party screen in the games. */
 export function PartyBar(props: Props) {
   const { data, lookup, roster, team, opponent } = props
-  const opponentIndex = opponent ? lookup.dexByName.get(opponent.name.toLowerCase()) : undefined
-  const foe = opponentIndex === undefined ? undefined : data.dex[opponentIndex]
+  const foe = resolveOpponent(data, lookup, opponent)
 
   return (
     <nav class="party" aria-label={opponent ? 'Your party: choose who is out' : 'Your party'}>
@@ -42,16 +41,8 @@ export function PartyBar(props: Props) {
             </button>
           )
         }
-        const taken = foe
-          ? (rankMember(data, resolveMember(data, lookup, entry), {
-              name: foe.n,
-              types: foe.t,
-              stats: foe.s,
-              ability: opponent?.ability ?? '',
-            }, slot).worstIncoming?.multiplier ?? 1)
-          : null
-        // Only marks that matter: a hard hit or a resisted one. Neutral is the default.
-        const m = taken === null || taken === 1 ? null : mark(taken)
+        const r = foe ? rankMember(data, resolveMember(data, lookup, entry), foe, slot) : null
+        const m = r ? mark(r.takes?.max ?? 0, r.ohkoRisk) : null
         return (
           <button
             key={`${entry.n}-${index}`}
@@ -59,7 +50,7 @@ export function PartyBar(props: Props) {
             aria-pressed={opponent ? props.out === index : undefined}
             aria-label={
               opponent
-                ? `${entry.n}${m ? `, takes ${m.text}` : ''}${props.out === index ? ', currently out' : ''}`
+                ? `${entry.n}${r?.ohkoRisk ? ', can be knocked out in one hit' : m ? `, takes up to ${m.text}` : ''}${props.out === index ? ', currently out' : ''}`
                 : `${entry.n}: open in Pokédex`
             }
             title={entry.n}

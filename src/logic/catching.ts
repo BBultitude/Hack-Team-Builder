@@ -1,5 +1,6 @@
 import type { DexEntry, GameData, RosterEntry } from '../types'
 import { STAT } from '../types'
+import { evolutionPath } from './member'
 
 /**
  * Catching advice: which ball, which roster member weakens or statuses the
@@ -142,6 +143,60 @@ function findHelper(
     })
   })
   return (best as { helper: Helper } | null)?.helper ?? null
+}
+
+/** Below this per-throw chance even in the best case, a catch realistically needs a Master Ball. */
+export const MIN_BEST_CASE_CHANCE = 0.1
+
+/** Best case with an Ultra Ball: the target at 1 HP and asleep. */
+export function needsMasterBall(captureRate: number, gen: number): boolean {
+  return catchChance(captureRate, 2, statusBonus('sleep', gen), 0) < MIN_BEST_CASE_CHANCE
+}
+
+/** Location text for a Pokemon handed over rather than caught: eggs, gifts, trades, rewards. */
+export const isGift = (where: string): boolean => /\b(egg|gift|given|receive|reward|trade|obtained)\b/i.test(where)
+
+/** Location text that only says to evolve an earlier stage. */
+export const isEvolveOnly = (where: string): boolean => /^evolve\b/i.test(where.trim())
+
+export interface CatchSource {
+  /** Dex index to go and get: the target itself or an earlier stage. */
+  from: number
+  /** Where the hack has it, when the setup has location data. */
+  where?: string
+  /** Handed over (egg, gift, trade), so no ball is needed. */
+  gift: boolean
+}
+
+/**
+ * How the player can get `target` in this setup, or null when they can't
+ * realistically: not in the hack, above the generation cap, or a catch that
+ * needs a Master Ball. `family` lists the dex indices sharing its family.
+ */
+export function catchSource(data: GameData, target: number, family: readonly number[]): CatchSource | null {
+  const gen = data.gen ?? 9
+  const dex = data.dex[target]
+  if (!dex) return null
+  const catchable = (from: number, gift: boolean): boolean =>
+    (data.dex[from]?.g ?? 99) <= gen && (gift || !needsMasterBall(data.dex[from]?.cr ?? 0, gen))
+
+  if (!data.obtain) {
+    const from = dex.cf ?? target
+    return dex.ok && catchable(from, false) ? { from, gift: false } : null
+  }
+
+  // The earliest stage the hack lets you get directly; evolution-only entries point further back.
+  let best: { from: number; length: number; where: string } | null = null
+  for (const x of family) {
+    const where = data.obtain[x]
+    if (!where || isEvolveOnly(where)) continue
+    const path = evolutionPath(data, x, target)
+    if (path[0] !== x || path[path.length - 1] !== target) continue
+    if (!best || path.length > best.length) best = { from: x, length: path.length, where }
+  }
+  if (!best) return null
+  const gift = isGift(best.where)
+  return catchable(best.from, gift) ? { from: best.from, where: best.where, gift } : null
 }
 
 const pct = (p: number): string => `${Math.round(p * 100)}%`

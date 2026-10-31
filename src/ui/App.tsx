@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import type { GameData, RosterEntry } from '../types'
+import type { GameData, HackPack, RosterEntry } from '../types'
 import { buildLookup } from '../logic/lookup'
 import {
   EMPTY_STATE,
+  type Hack,
   type RankScope,
   type SetupIndex,
   type SetupMeta,
@@ -17,17 +18,21 @@ import {
   saveSetups,
   serialiseState,
 } from '../logic/storage'
-import { adaptRoster, forSetup } from '../logic/setup'
+import { adaptRoster, forSetup, withHack } from '../logic/setup'
 import { type SyncStatus, mergeIndex, setAccessCode, statusFor, syncSetups } from '../logic/sync'
 import { SetupPanel } from './SetupPanel'
 import { PartyBar } from './PartyBar'
-import { loadGameData } from '../data/load'
+import { loadGameData, loadHack } from '../data/load'
 import { PokedexTab, addToRoster } from './PokedexTab'
 import { TeamTab } from './TeamTab'
 import { LookForTab } from './LookForTab'
 import { OpponentTab } from './OpponentTab'
+import { PokemonModal } from './PokemonModal'
 
 type Tab = 'dex' | 'team' | 'look' | 'opponent'
+
+/** Unbound's middle trainer difficulty, used until the player picks one. */
+const DEFAULT_DIFFICULTY = 'expert'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dex', label: 'Pokédex' },
@@ -41,6 +46,8 @@ export function App() {
   const [vanilla, setVanilla] = useState<GameData | null>(null)
   const [setups, setSetupsState] = useState<SetupIndex>(() => loadSetups())
   const [error, setError] = useState<string | null>(null)
+  /** The loaded hack pack and which hack it is for, so a stale one is never applied. */
+  const [packed, setPacked] = useState<{ hack: Hack; pack: HackPack } | null>(null)
   const [tab, setTab] = useState<Tab>('dex')
   const [openIndex, setOpenIndex] = useState<number | null>(null)
 
@@ -64,9 +71,30 @@ export function App() {
   const syncedStamp = useRef(-1)
 
   const active: SetupMeta = liveSetups(setups).find((s) => s.id === setups.active) ?? liveSetups(setups)[0]!
-  const data = useMemo(() => (vanilla ? forSetup(vanilla, active.gen) : null), [vanilla, active.gen])
-  // Names and indices are the same in every generation, so one lookup serves all setups.
-  const lookup = useMemo(() => (vanilla ? buildLookup(vanilla) : null), [vanilla])
+  const pack = active.hack && packed?.hack === active.hack ? packed.pack : null
+  // Until the active hack's pack arrives there is no data, so nothing restores against the wrong dex.
+  const hacked = useMemo(
+    () => (vanilla && (!active.hack || pack) ? withHack(vanilla, pack) : null),
+    [vanilla, active.hack, pack],
+  )
+  const data = useMemo(() => (hacked ? forSetup(hacked, active.gen) : null), [hacked, active.gen])
+  // Names and indices are the same in every generation, so one lookup serves a hack's every cap.
+  const lookup = useMemo(() => (hacked ? buildLookup(hacked) : null), [hacked])
+  const difficulties = pack?.difficulties ?? []
+  const difficulty =
+    difficulties.find((d) => d.id === active.difficulty) ?? difficulties.find((d) => d.id === DEFAULT_DIFFICULTY) ?? difficulties[0]
+  const trainers = difficulty ? (pack?.trainers?.[difficulty.sets] ?? []) : []
+
+  /** Publishes the sticky header's height as --head, so the party bar pins just below it. */
+  const observeHead = useMemo(() => {
+    let observer: ResizeObserver | null = null
+    return (el: HTMLElement | null): void => {
+      observer?.disconnect()
+      if (!el) return
+      observer = new ResizeObserver(() => document.documentElement.style.setProperty('--head', `${el.offsetHeight}px`))
+      observer.observe(el)
+    }
+  }, [])
 
   const setSetups = (next: SetupIndex): void => {
     saveSetups(next)
@@ -86,6 +114,14 @@ export function App() {
   useEffect(() => {
     loadGameData().then(setVanilla).catch((e: Error) => setError(e.message))
   }, [])
+
+  useEffect(() => {
+    const hack = active.hack
+    if (!hack || packed?.hack === hack) return
+    loadHack(hack)
+      .then((p) => setPacked({ hack, pack: p }))
+      .catch((e: Error) => setError(e.message))
+  }, [active.hack])
 
   useEffect(() => {
     if (!data || !lookup || restored) return
@@ -170,8 +206,8 @@ export function App() {
     setSetups({ ...setups, active: id })
   }
 
-  const createSetup = (name: string, gen: number, copyFrom?: string): void => {
-    const meta: SetupMeta = { id: newSetupId(), name, gen, updatedAt: Date.now() }
+  const createSetup = (name: string, gen: number, hack: Hack | undefined, copyFrom?: string): void => {
+    const meta: SetupMeta = { id: newSetupId(), name, gen, ...(hack ? { hack } : {}), updatedAt: Date.now() }
     if (copyFrom) saveRaw(meta.id, loadRaw(copyFrom))
     setRestored(false)
     setSetups({ active: meta.id, list: [...setups.list, meta] })
@@ -191,9 +227,23 @@ export function App() {
   }
 
   const changeGen = (gen: number): void => {
-    if (!vanilla || !data || gen === active.gen) return
-    setRoster(adaptRoster(data, forSetup(vanilla, gen), roster))
+    if (!hacked || !data || gen === active.gen) return
+    setRoster(adaptRoster(data, forSetup(hacked, gen), roster))
     patchActive({ gen })
+  }
+
+  /** Switches the hack, moving to its generation cap and bringing the Pokedex over to its data. */
+  const changeHack = async (hack: Hack | undefined): Promise<void> => {
+    if (!vanilla || !data || hack === active.hack) return
+    try {
+      const next = hack ? await loadHack(hack) : null
+      const gen = next?.gen ?? active.gen
+      if (hack && next) setPacked({ hack, pack: next })
+      setRoster(adaptRoster(data, forSetup(withHack(vanilla, next), gen), roster))
+      patchActive({ hack, gen })
+    } catch (e) {
+      setError((e as Error).message)
+    }
   }
 
   const syncLabel =
@@ -206,7 +256,7 @@ export function App() {
         : syncLabel
 
   const shellTop = (
-    <header class="shell-top">
+    <header class="shell-top" ref={observeHead}>
       <div class="shell-row">
         <span class={`lens sync-${sync}`} aria-hidden="true" />
         <span class="leds" aria-hidden="true"><i /><i /><i /></span>
@@ -263,12 +313,8 @@ export function App() {
             opponent={tab === 'opponent' ? opponent : null}
             out={outIndex}
             onPick={(i) => {
-              if (tab === 'opponent') {
-                setOutIndex(outIndex === i ? null : i)
-              } else {
-                setTab('dex')
-                setOpenIndex(i)
-              }
+              if (tab === 'opponent') setOutIndex(outIndex === i ? null : i)
+              else setOpenIndex(i)
             }}
             onEmpty={() => setTab('dex')}
           />
@@ -303,6 +349,10 @@ export function App() {
                 active={active}
                 onRename={(name) => patchActive({ name })}
                 onGen={changeGen}
+                onHack={(h) => void changeHack(h)}
+                difficulties={difficulties}
+                difficulty={difficulty}
+                onDifficulty={(d) => patchActive({ difficulty: d })}
                 onCreate={createSetup}
                 onDelete={deleteActive}
               />
@@ -313,14 +363,14 @@ export function App() {
                 lookup={lookup}
                 roster={roster}
                 team={team}
-                openIndex={openIndex}
-                onOpenIndex={setOpenIndex}
+                regional={pack?.regional}
                 onRoster={setRoster}
                 onTeam={setTeam}
+                onOpen={setOpenIndex}
               />
             )}
             {tab === 'team' && (
-              <TeamTab data={data} lookup={lookup} roster={roster} team={team} onTeam={setTeam} />
+              <TeamTab data={data} lookup={lookup} roster={roster} team={team} onTeam={setTeam} onOpen={setOpenIndex} />
             )}
             {tab === 'look' && (
               <LookForTab
@@ -348,17 +398,31 @@ export function App() {
                 onOut={setOutIndex}
                 onOpponent={setOpponent}
                 onScope={setScope}
+                trainers={trainers}
               />
             )}
 
             <p class="muted" style="margin-top:1.5rem">
-              Vanilla data from PokeAPI, Pokémon up to Generation {active.gen}. Hack differences are handled by
-              editing each Pokémon. Types and basic abilities only, with no damage numbers, items, weather or
-              terrain.
+              {pack
+                ? `${pack.name} data from ${pack.source}, over vanilla data from PokeAPI.`
+                : 'Vanilla data from PokeAPI.'}{' '}
+              Pokémon up to Generation {active.gen}. Damage numbers are estimates: no critical hits, weather,
+              terrain or stat changes.
             </p>
           </main>
         </div>
       </div>
+
+      <PokemonModal
+        data={data}
+        lookup={lookup}
+        roster={roster}
+        team={team}
+        index={openIndex}
+        onClose={() => setOpenIndex(null)}
+        onRoster={setRoster}
+        onTeam={setTeam}
+      />
 
       <nav class="tabs" role="tablist" aria-label="Sections">
         {TABS.map((t) => (

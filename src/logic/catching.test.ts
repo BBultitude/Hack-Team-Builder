@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { RosterEntry } from '../types'
 import { data, dexIndex } from './testData'
-import { ballsFor, catchChance, catchPlan, throwChance } from './catching'
+import { MIN_BEST_CASE_CHANCE, ballsFor, catchChance, catchPlan, catchSource, isEvolveOnly, isGift, needsMasterBall, throwChance } from './catching'
 
 function own(name: string, mv: string[] = ['', '', '', '']): RosterEntry {
   const d = dexIndex(name)
@@ -56,5 +56,49 @@ describe('catch plan', () => {
 
   it('does not paralyse an Electric type', () => {
     expect(catchPlan(data, [own('Pikachu')], [0], dexIndex('Voltorb'))!.status).toBeNull()
+  })
+})
+
+describe('what is realistically catchable', () => {
+  it('hides a catch that needs a Master Ball, keeps an ordinary one', () => {
+    // Best case with an Ultra Ball (1 HP, asleep): catch rate 3 is about 5% a throw, 45 well over half.
+    expect(needsMasterBall(3, 8)).toBe(true)
+    expect(needsMasterBall(45, 8)).toBe(false)
+    expect(catchChance(3, 2, 2.5, 0)).toBeLessThan(MIN_BEST_CASE_CHANCE)
+  })
+
+  it('reads gift, egg and evolve-only location text', () => {
+    expect(isGift('Obtained as an egg randomly from the Magnolia Café Egg Lady')).toBe(true)
+    expect(isGift('Grim Woods, Vivill Woods (Day)')).toBe(false)
+    expect(isEvolveOnly('Evolve Ivysaur (Lv. 32)')).toBe(true)
+  })
+
+  it('without location data, follows the vanilla catchable flag and catch stage', () => {
+    const fm = (n: string) => data.dex[dexIndex(n)]!.fm
+    const family = data.dex.map((_, i) => i).filter((i) => data.dex[i]!.fm === fm('Charizard'))
+    expect(catchSource(data, dexIndex('Charizard'), family)).toEqual({ from: dexIndex('Charmander'), gift: false })
+    const mewtwo = data.dex.map((_, i) => i).filter((i) => data.dex[i]!.fm === fm('Mewtwo'))
+    expect(catchSource(data, dexIndex('Mewtwo'), mewtwo)).toBeNull()
+  })
+
+  it('with location data, uses where the hack has it, catches the earliest stage, and lets gifts through', () => {
+    const family = (n: string) => data.dex.map((_, i) => i).filter((i) => data.dex[i]!.fm === data.dex[dexIndex(n)]!.fm)
+    const obtain = {
+      [dexIndex('Bulbasaur')]: 'Obtained as an egg from the Egg Lady',
+      [dexIndex('Ivysaur')]: 'Evolve Bulbasaur (Lv. 16)',
+      [dexIndex('Mewtwo')]: 'Cerulean Cave',
+      [dexIndex('Gible')]: 'Ruins',
+    }
+    const hacked = { ...data, obtain }
+    // A gift egg skips the ball check; the evolve-only Ivysaur entry points back to Bulbasaur.
+    expect(catchSource(hacked, dexIndex('Venusaur'), family('Venusaur'))).toMatchObject({ from: dexIndex('Bulbasaur'), gift: true })
+    // Catch rate 3 and a wild encounter: realistically a Master Ball, so hidden.
+    expect(catchSource(hacked, dexIndex('Mewtwo'), family('Mewtwo'))).toBeNull()
+    // Not in the hack's location list at all: hidden.
+    expect(catchSource(hacked, dexIndex('Charizard'), family('Charizard'))).toBeNull()
+    // A hack catch rate overrides vanilla: Gible at 3 needs a Master Ball.
+    const hard = { ...hacked, dex: hacked.dex.map((d, i) => (i === dexIndex('Gible') ? { ...d, cr: 3 } : d)) }
+    expect(catchSource(hacked, dexIndex('Gible'), family('Gible'))).not.toBeNull()
+    expect(catchSource(hard, dexIndex('Gible'), family('Gible'))).toBeNull()
   })
 })

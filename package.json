@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build:data": "tsx scripts/build-data.ts",
+    "build:hacks": "tsx scripts/build-hacks.ts",
     "smoke": "node scripts/smoke.mjs",
     "sprites": "node scripts/fetch-sprites.mjs",
     "start": "node server/index.mjs"

@@ -73,6 +73,13 @@ async function readBody(req) {
   }
 }
 
+/** Optional hack id and difficulty: short lower-case words, dropped when anything else. */
+const WORD = /^[a-z]{1,20}$/
+const extras = (s) => ({
+  ...(WORD.test(s.hack ?? '') ? { hack: s.hack } : {}),
+  ...(WORD.test(s.difficulty ?? '') ? { difficulty: s.difficulty } : {}),
+})
+
 /** The stored shape. Roster contents are validated again by the app on load. */
 function validSetup(id, body) {
   if (typeof body !== 'object' || body === null) throw new HttpError(400, 'Expected an object')
@@ -84,7 +91,7 @@ function validSetup(id, body) {
   if (!deleted && (typeof state !== 'object' || state === null || Array.isArray(state))) {
     throw new HttpError(400, 'state must be an object')
   }
-  return deleted ? { id, name, gen, updatedAt, deleted: true } : { id, name, gen, updatedAt, state }
+  return deleted ? { id, name, gen, updatedAt, deleted: true } : { id, name, gen, ...extras(body), updatedAt, state }
 }
 
 function authorised(req, accessCode) {
@@ -133,7 +140,7 @@ export function createApp({ distDir = join(ROOT, 'dist'), dataDir = join(ROOT, '
       const list = []
       for (const f of names) {
         const s = await readSetup(f.slice(0, -5))
-        if (s) list.push({ id: s.id, name: s.name, gen: s.gen, updatedAt: s.updatedAt, ...(s.deleted ? { deleted: true } : {}) })
+        if (s) list.push({ id: s.id, name: s.name, gen: s.gen, ...extras(s), updatedAt: s.updatedAt, ...(s.deleted ? { deleted: true } : {}) })
       }
       return sendJson(res, 200, list)
     }

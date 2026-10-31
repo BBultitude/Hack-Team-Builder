@@ -74,6 +74,8 @@ export interface GameData {
   catchMoves: Record<string, number[]>
   /** Parallel to catchMoves: one digit per learner, the first generation it could learn it. */
   catchGens: Record<string, string>
+  /** How to get each species in the setup's hack, by dex index; absent means no location data (vanilla rules apply). */
+  obtain?: Record<number, string>
   /** Newest generation in play; set by forSetup. Absent means every generation (9). */
   gen?: number
 }
@@ -119,4 +121,54 @@ export interface RosterEntry {
   st: number[] | null
   /** Dex index, or -1 for a custom Pokemon with no vanilla counterpart. */
   d: number
+  /** Level, 1-100; absent in saves from before levels, read as 50. */
+  lv?: number
+}
+
+/** One Pokemon on a hack trainer's team, as data/hacks/<hack>.json stores it. */
+export interface TrainerMon {
+  /** Dex name (vanilla, or a form the pack adds). */
+  n: string
+  lv: number
+  ab: string
+  /** Held item, '' for none. */
+  it: string
+  /** Nature name, '' when unknown. */
+  nt: string
+  /** Six values each, in STAT order. */
+  ev: number[]
+  iv: number[]
+  /** Move names as the hack's docs give them, status moves included. */
+  mv: string[]
+}
+
+export interface Trainer {
+  name: string
+  team: TrainerMon[]
+}
+
+/**
+ * A ROM hack's differences from vanilla, built by scripts/build-hacks.ts.
+ * Keyed by name so it survives a regeneration of the vanilla data.
+ */
+export interface HackPack {
+  name: string
+  /** Where the data came from, for the footer. */
+  source: string
+  /** Newest generation the hack includes; suggested as the setup's cap. */
+  gen: number
+  /** Changed species by dex name. With `base`, a form the vanilla dex lacks, copied from that entry. */
+  dex: Record<string, { t?: number[]; s?: number[]; ab?: string[]; hab?: string[]; cr?: number; base?: string }>
+  /** Trainer difficulties in game order; `sets` names the trainers key holding that difficulty's teams. */
+  difficulties?: { id: string; label: string; sets: string; note?: string }[]
+  /** The game's own regional dex, as dex names in its order. */
+  regional?: string[]
+  /** How to get each obtainable species, by dex name; absent means it can't be got in this hack. */
+  obtain?: Record<string, string>
+  /** Level-up moves the hack adds, by dex name. */
+  learn?: Record<string, string[]>
+  /** Boss teams per difficulty. */
+  trainers?: Record<string, Trainer[]>
+  /** Names the build couldn't map, kept for review. */
+  unmatched: string[]
 }

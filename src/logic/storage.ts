@@ -9,10 +9,27 @@ export const stateKey = (id: string): string => `ptb2:s:${id}`
 
 export type RankScope = 'team' | 'all'
 
+/** The opponent as picked: by hand (name, maybe ability, level, moves) or from a trainer's team (everything). */
+export interface SavedOpponent {
+  name: string
+  ability: string
+  lv?: number
+  /** Up to four move names. */
+  mv?: string[]
+  item?: string
+  /** Index into GameData.natures. */
+  nt?: number
+  /** Six values each. */
+  ev?: number[]
+  iv?: number[]
+  /** Trainer it came from, for the heading. */
+  trainer?: string
+}
+
 export interface SavedState {
   roster: RosterEntry[]
   team: number[]
-  opponent: { name: string; ability: string } | null
+  opponent: SavedOpponent | null
   scope: RankScope
 }
 
@@ -32,6 +49,33 @@ function num(value: unknown, fallback: number): number {
 
 function str(value: unknown): string {
   return typeof value === 'string' ? value : ''
+}
+
+const level = (v: unknown): number => Math.min(Math.max(Math.trunc(num(v, 50)), 1), 100)
+
+const six = (v: unknown, max: number): number[] | undefined =>
+  Array.isArray(v) && v.length === 6 ? v.map((x) => Math.min(Math.max(Math.trunc(num(x, 0)), 0), max)) : undefined
+
+/** Optional fields only when present, so a hand-picked opponent stays as small as before. */
+export function parseOpponent(raw: unknown, natureCount: number): SavedOpponent | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const o = raw as Record<string, unknown>
+  const name = str(o.name).trim()
+  if (!name) return null
+  const ev = six(o.ev, 255)
+  const iv = six(o.iv, 31)
+  const nt = Math.trunc(num(o.nt, -1))
+  return {
+    name,
+    ability: str(o.ability),
+    ...(o.lv === undefined ? {} : { lv: level(o.lv) }),
+    ...(Array.isArray(o.mv) ? { mv: o.mv.slice(0, 4).map(str) } : {}),
+    ...(str(o.item) ? { item: str(o.item) } : {}),
+    ...(nt >= 0 && nt < natureCount ? { nt } : {}),
+    ...(ev ? { ev } : {}),
+    ...(iv ? { iv } : {}),
+    ...(str(o.trainer) ? { trainer: str(o.trainer) } : {}),
+  }
 }
 
 /**
@@ -75,6 +119,7 @@ function parseEntry(raw: unknown, data: GameData, lookup: Lookup): RosterEntry |
     mv: moves,
     st: stats,
     d: dex,
+    ...(o.lv === undefined ? {} : { lv: level(o.lv) }),
   }
 }
 
@@ -111,12 +156,7 @@ export function parseState(raw: unknown, data: GameData, lookup: Lookup): SavedS
         .slice(0, MAX_TEAM)
     : []
 
-  let opponent: SavedState['opponent'] = null
-  if (typeof parsed.o === 'object' && parsed.o !== null) {
-    const o = parsed.o as Record<string, unknown>
-    const name = str(o.name).trim()
-    if (name) opponent = { name, ability: str(o.ability) }
-  }
+  const opponent = parseOpponent(parsed.o, data.natures.length)
 
   return { roster, team, opponent, scope: parsed.s === 'all' ? 'all' : 'team' }
 }
@@ -157,6 +197,10 @@ export interface SetupMeta {
   name: string
   /** Pokemon up to and including this generation. */
   gen: number
+  /** ROM hack whose data pack applies; absent means vanilla. */
+  hack?: Hack
+  /** Trainer difficulty within the hack, when it has more than one. */
+  difficulty?: string
   /** Milliseconds; the newer copy wins when syncing. */
   updatedAt: number
   /** Kept as a tombstone so a stale copy elsewhere can't bring it back. */
@@ -164,6 +208,9 @@ export interface SetupMeta {
   /** The automatic first setup, never edited: dropped if the server already has games. */
   fresh?: true
 }
+
+export const HACKS = ['unbound', 'rogue'] as const
+export type Hack = (typeof HACKS)[number]
 
 export interface SetupIndex {
   active: string
@@ -187,6 +234,8 @@ export function parseSetupMeta(raw: unknown): SetupMeta | null {
     id,
     name: str(o.name).trim().slice(0, 60) || 'Untitled game',
     gen: Math.min(Math.max(gen, 1), 9),
+    ...(HACKS.includes(o.hack as Hack) ? { hack: o.hack as Hack } : {}),
+    ...(/^[a-z]{1,20}$/.test(str(o.difficulty)) ? { difficulty: str(o.difficulty) } : {}),
     updatedAt: num(o.updatedAt, 0),
     ...(o.deleted === true ? { deleted: true as const } : {}),
     ...(o.fresh === true ? { fresh: true as const } : {}),
