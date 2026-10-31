@@ -378,6 +378,14 @@ await step('the Dex header and party stay put while the screen scrolls', async (
   }))
   if (pos.scrolled < 300) throw new Error(`page did not scroll (${pos.scrolled})`)
   if (Math.abs(pos.head.top) > 1) throw new Error(`header moved to ${pos.head.top}`)
+  // Nothing hides under the pinned header: the first thing below it starts at its bottom edge.
+  const gap = await page.evaluate(() => {
+    window.scrollTo(0, 0)
+    return document.querySelector('.bezel').getBoundingClientRect().top - document.querySelector('.shell-top').getBoundingClientRect().bottom
+  })
+  if (Math.abs(gap) > 1) throw new Error(`content starts ${gap}px from the header's bottom`)
+  await page.evaluate(() => window.scrollTo(0, 600))
+  await page.waitForTimeout(100)
   if (Math.abs(pos.party - pos.head.bottom) > 1) throw new Error(`party at ${pos.party}, header ends at ${pos.head.bottom}`)
   await page.screenshot({ path: process.env.SHOT ?? '/tmp/smoke-sticky.png' })
   await page.evaluate(() => window.scrollTo(0, 0))

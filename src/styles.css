@@ -103,7 +103,7 @@
 
 html {
   /* Focus and in-page jumps land below the sticky header and party bar. */
-  scroll-padding-top: calc(var(--head, 0px) + 80px);
+  scroll-padding-top: calc(var(--head-gap, 0px) + var(--head, 0px) + 80px);
 }
 
 html, body {
@@ -178,6 +178,7 @@ input[type="number"] { padding-right: 0.2rem; }
 
 .dex {
   min-height: 100vh;
+  padding-top: var(--head, 0px);
   display: flex;
   flex-direction: column;
   background: var(--shell);
@@ -185,9 +186,17 @@ input[type="number"] { padding-right: 0.2rem; }
 
 /* Top of the shell: lens, the three lights, title, sync status, game picker. */
 .shell-top {
-  /* The Dex lid stays put while the screen scrolls under it; App measures it into --head. */
-  position: sticky;
-  top: 0;
+  /*
+   * The Dex lid stays put while the screen scrolls under it. Fixed rather than
+   * sticky so no ancestor's overflow or browser quirk can unpin it; App
+   * measures its height into --head and .dex makes room for it.
+   */
+  position: fixed;
+  top: var(--head-gap, 0px);
+  left: 0;
+  right: 0;
+  max-width: 560px;
+  margin: 0 auto;
   z-index: 7;
   padding: calc(0.75rem + env(safe-area-inset-top)) calc(0.9rem + env(safe-area-inset-right)) 0.85rem
     calc(0.9rem + env(safe-area-inset-left));
@@ -315,7 +324,7 @@ body.suggest-open main {
 /* Party: the team's six slots, always in view at the top of the screen. */
 .party {
   position: sticky;
-  top: var(--head, 0px);
+  top: calc(var(--head-gap, 0px) + var(--head, 0px));
   z-index: 5;
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -350,9 +359,27 @@ body.suggest-open main {
 
 /* At tablet width and up, the device sits on the page with a little shell around it. */
 @media (min-width: 600px) {
+  /* The device sits 1.5rem down the page; the pinned header keeps that gap. */
+  :root { --head-gap: 1.5rem; }
   #app { padding: 1.5rem 0; }
+  /*
+   * Page-coloured strips over the gaps above the pinned header and below the
+   * pinned tabs, so scrolled content never shows through. The bars stay
+   * square: a rounded corner would let the content peek out.
+   */
+  .shell-top::before,
+  .tabs::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    z-index: -1;
+    background: var(--page);
+  }
+  .shell-top::before { top: calc(-1 * var(--head-gap)); height: var(--head-gap); }
+  .tabs::after { bottom: -1rem; height: 1rem; }
   .dex { border-radius: 22px 22px 0 0; min-height: calc(100vh - 1.5rem); overflow: clip; }
-  .tabs { border-radius: 0 0 22px 22px; bottom: 1rem; }
+  .tabs { bottom: 1rem; }
   main { padding-bottom: 6.5rem; }
 }
 
