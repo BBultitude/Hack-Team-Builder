@@ -10,6 +10,8 @@ import {
   suggestAdditions,
 } from '../logic/team'
 import { DefenceMatrix } from './DefenceMatrix'
+import { Sprite } from './Sprite'
+import { Types } from './Types'
 
 interface Props {
   data: GameData
@@ -62,14 +64,10 @@ export function TeamTab(props: Props) {
           </p>
         ) : (
           <>
-            <p class="row wrap" style="margin:0.6rem 0 0;gap:0.3rem">
-              {members.map((m) => (
-                <span key={m.entry.n} class="type">{m.entry.n}</span>
-              ))}
-            </p>
             <p class="muted" style="margin:0.6rem 0 0">
-              Team score <strong>{analysis.score.toFixed(1)}</strong> — defence{' '}
-              {analysis.defensiveScore.toFixed(1)}, coverage {analysis.covered.length}/18 types.
+              Team score <strong class="lcd">{analysis.score.toFixed(1)}</strong>. Defence{' '}
+              <span class="lcd">{analysis.defensiveScore.toFixed(1)}</span>, coverage{' '}
+              <span class="lcd">{analysis.covered.length}/{data.chart.types.length}</span> types.
             </p>
           </>
         )}
@@ -88,7 +86,8 @@ export function TeamTab(props: Props) {
                 const recs = recommended[slot]
                 return (
                   <div key={`${m.entry.n}-${slot}`}>
-                    <h3 style="margin:0 0 0.2rem">
+                    <h3 class="row" style="margin:0 0 0.2rem;gap:0.3rem">
+                      <Sprite gen={data.gen} id={data.dex[m.entry.d]?.id} />
                       {m.entry.n} <span class="muted">({m.role})</span>
                     </h3>
                     {recs === null || recs === undefined ? (
@@ -137,9 +136,7 @@ export function TeamTab(props: Props) {
                 {analysis.exposed.length === 0 ? (
                   <span class="muted">None — every weakness is covered by a resistance.</span>
                 ) : (
-                  analysis.exposed.map((t) => (
-                    <span key={t} class="type weak">{typeName(t)}</span>
-                  ))
+                  <Types data={data} types={analysis.exposed} weak />
                 )}
               </div>
             </div>
@@ -152,11 +149,9 @@ export function TeamTab(props: Props) {
               </p>
               <div class="chip-row">
                 {analysis.uncovered.length === 0 ? (
-                  <span class="muted">None — the team hits all 18 types.</span>
+                  <span class="muted">None — the team hits all {data.chart.types.length} types.</span>
                 ) : (
-                  analysis.uncovered.map((t) => (
-                    <span key={t} class="type">{typeName(t)}</span>
-                  ))
+                  <Types data={data} types={analysis.uncovered} />
                 )}
               </div>
             </div>
@@ -175,15 +170,24 @@ export function TeamTab(props: Props) {
               <h2>Suggested additions</h2>
               <div class="stack">
                 {suggestions.map((s) => (
-                  <div key={s.index} class="row">
-                    <span class="grow truncate">{roster[s.index]?.n}</span>
-                    <span class={s.gain >= 0 ? 'muted good' : 'muted'}>
-                      {s.gain >= 0 ? '+' : ''}
-                      {s.gain.toFixed(1)}
-                    </span>
-                    <button onClick={() => props.onTeam([...team, s.index])} disabled={team.length >= MAX_TEAM}>
-                      Add
-                    </button>
+                  <div key={s.index}>
+                    <div class="row">
+                      <Sprite gen={data.gen} id={data.dex[roster[s.index]?.d ?? -1]?.id} size={32} />
+                      <span class="grow truncate">{roster[s.index]?.n}</span>
+                      <span class={s.gain >= 0 ? 'good lcd' : 'muted lcd'} title="Team score gain">
+                        {s.gain >= 0 ? '+' : ''}
+                        {s.gain.toFixed(1)}
+                      </span>
+                      <button onClick={() => props.onTeam([...team, s.index])} disabled={team.length >= MAX_TEAM}>
+                        Add
+                      </button>
+                    </div>
+                    {(s.resists.length > 0 || s.hits.length > 0) && (
+                      <p class="muted" style="margin:0.2rem 0 0">
+                        {s.resists.length > 0 && `Covers your ${s.resists.map(typeName).join(', ')} weakness. `}
+                        {s.hits.length > 0 && `Hits ${s.hits.map(typeName).join(', ')} super-effectively.`}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>

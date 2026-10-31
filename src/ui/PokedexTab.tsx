@@ -2,6 +2,7 @@ import type { GameData, RosterEntry } from '../types'
 import type { Lookup } from '../logic/lookup'
 import { entryFromDex } from '../logic/member'
 import { MAX_TEAM } from '../logic/team'
+import { dexNames } from '../logic/setup'
 import { PokemonEditor } from './PokemonEditor'
 import { Suggest } from './Suggest'
 
@@ -60,7 +61,7 @@ export function PokedexTab(props: Props) {
         <Suggest
           value=""
           placeholder="Search by name, or type a custom one"
-          options={data.dex.map((d) => d.n)}
+          options={dexNames(data)}
           onPick={add}
           clearOnPick
         />

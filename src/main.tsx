@@ -1,5 +1,9 @@
 import { render } from 'preact'
 import { App } from './ui/App'
+// Bundled so the site works offline and never calls a font host.
+import '@fontsource/atkinson-hyperlegible/latin-400.css'
+import '@fontsource/atkinson-hyperlegible/latin-700.css'
+import '@fontsource/vt323/latin-400.css'
 import './styles.css'
 
 const root = document.getElementById('app')

@@ -4,3 +4,11 @@ scripts/.cache/
 
 # Scratch scripts from the build session; safe to delete.
 ptb-*
+
+
+skills-lock.json
+
+.claude/**
+.remember/**
+public/sprites/
+.data/

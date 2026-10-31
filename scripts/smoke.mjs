@@ -224,6 +224,38 @@ await step('state survives a reload', async () => {
   await page.waitForSelector('h2:has-text("team 6/6")', { timeout: 5000 })
 })
 
+await step('a Gen 3 game setup has its own Pokédex and Gen 3 rules', async () => {
+  await page.click('button[role="tab"]:has-text("Pokédex")')
+  await page.locator('summary:has-text("Game setup")').click()
+  await page.click('button:text-is("New game")')
+  await page.fill('input[placeholder="Pokémon Unbound"]', 'Vanilla Emerald')
+  await page.locator('.sub-panel select').selectOption('3')
+  await page.click('button:text-is("Create game")')
+  await page.waitForSelector('text=Your Pokémon (0)', { timeout: 5000 })
+
+  await page.fill(addBox, 'Lucario')
+  if (await page.locator('.suggest-list button:text-is("Lucario")').count()) throw new Error('Lucario offered in Gen 3')
+  await page.fill(addBox, '')
+  for (const n of ['Clefairy', 'Gengar']) await add(n)
+  const clefairy = await page.locator('.card:has-text("Clefairy") .editor-head').first().innerText()
+  if (!clefairy.includes('Normal')) throw new Error(`Clefairy should be Normal in Gen 3: ${clefairy}`)
+
+  await page.click('button[role="tab"]:has-text("Best Team")')
+  const rows = await page.locator('.matrix tbody tr').count()
+  if (rows !== 17) throw new Error(`expected 17 type rows without Fairy, got ${rows}`)
+})
+
+await step('switching back finds the first game untouched, and the choice survives a reload', async () => {
+  const pick = page.locator('.setup-pick select')
+  await pick.selectOption({ label: 'My game · Gen 9' })
+  await page.click('button[role="tab"]:has-text("Pokédex")')
+  await page.waitForSelector('text=Your Pokémon (8)', { timeout: 5000 })
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.waitForSelector('text=Your Pokémon (8)', { timeout: 15000 })
+  await pick.selectOption({ label: 'Vanilla Emerald · Gen 3' })
+  await page.waitForSelector('text=Your Pokémon (2)', { timeout: 5000 })
+})
+
 await step('no horizontal overflow at 390px', async () => {
   const over = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,

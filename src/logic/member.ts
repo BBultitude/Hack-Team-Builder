@@ -48,7 +48,8 @@ export function resolveMember(data: GameData, lookup: Lookup, entry: RosterEntry
     entry,
     types,
     stats,
-    ability: entry.ab,
+    // Abilities arrived in Generation 3.
+    ability: (data.gen ?? 9) < 3 ? '' : entry.ab,
     nature,
     moves,
     attackTypes: assumedFromTypes ? types : fromMoves,

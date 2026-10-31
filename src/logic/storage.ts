@@ -2,7 +2,10 @@ import type { GameData, RosterEntry } from '../types'
 import type { Lookup } from './lookup'
 import { MAX_TEAM } from './team'
 
-const KEY = 'ptb2'
+/** Before game setups there was one save under this key; it migrates into the first setup. */
+const LEGACY_KEY = 'ptb2'
+const INDEX_KEY = 'ptb2:setups'
+export const stateKey = (id: string): string => `ptb2:s:${id}`
 
 export type RankScope = 'team' | 'all'
 
@@ -15,7 +18,7 @@ export interface SavedState {
 
 export const EMPTY_STATE: SavedState = { roster: [], team: [], opponent: null, scope: 'team' }
 
-interface StoredShape {
+export interface StoredShape {
   v?: number
   r?: unknown
   t?: unknown
@@ -75,21 +78,28 @@ function parseEntry(raw: unknown, data: GameData, lookup: Lookup): RosterEntry |
   }
 }
 
-export function load(data: GameData, lookup: Lookup): SavedState {
-  let raw: string | null = null
+function read(key: string): unknown {
   try {
-    raw = localStorage.getItem(KEY)
+    const raw = localStorage.getItem(key)
+    return raw ? JSON.parse(raw) : null
   } catch {
-    return { ...EMPTY_STATE }
+    // Unavailable storage or corrupt JSON both mean "nothing saved".
+    return null
   }
-  if (!raw) return { ...EMPTY_STATE }
+}
 
-  let parsed: StoredShape
+function write(key: string, value: unknown): void {
   try {
-    parsed = JSON.parse(raw) as StoredShape
+    localStorage.setItem(key, JSON.stringify(value))
   } catch {
-    return { ...EMPTY_STATE }
+    // Private browsing or a full quota; the app still works for this session.
   }
+}
+
+/** Validates a stored or downloaded save; anything unusable falls back to empty. */
+export function parseState(raw: unknown, data: GameData, lookup: Lookup): SavedState {
+  if (typeof raw !== 'object' || raw === null) return { ...EMPTY_STATE }
+  const parsed = raw as StoredShape
 
   const roster = Array.isArray(parsed.r)
     ? parsed.r.map((e) => parseEntry(e, data, lookup)).filter((e): e is RosterEntry => e !== null)
@@ -111,17 +121,117 @@ export function load(data: GameData, lookup: Lookup): SavedState {
   return { roster, team, opponent, scope: parsed.s === 'all' ? 'all' : 'team' }
 }
 
-export function save(state: SavedState): void {
-  const payload: StoredShape = {
-    v: 1,
-    r: state.roster,
-    t: state.team,
-    o: state.opponent,
-    s: state.scope,
-  }
+export function serialiseState(state: SavedState): StoredShape {
+  return { v: 1, r: state.roster, t: state.team, o: state.opponent, s: state.scope }
+}
+
+export function load(data: GameData, lookup: Lookup, id: string): SavedState {
+  return parseState(read(stateKey(id)), data, lookup)
+}
+
+export function save(id: string, state: SavedState): void {
+  write(stateKey(id), serialiseState(state))
+}
+
+/** Raw stored blob for one setup, for syncing without re-parsing. */
+export function loadRaw(id: string): unknown {
+  return read(stateKey(id))
+}
+
+export function saveRaw(id: string, raw: unknown): void {
+  write(stateKey(id), raw)
+}
+
+export function removeState(id: string): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(payload))
+    localStorage.removeItem(stateKey(id))
   } catch {
-    // Private browsing or a full quota; the app still works for this session.
+    // Nothing to clean up if storage is unavailable.
   }
+}
+
+// ------------------------------------------------------------------ setups
+
+export interface SetupMeta {
+  id: string
+  name: string
+  /** Pokemon up to and including this generation. */
+  gen: number
+  /** Milliseconds; the newer copy wins when syncing. */
+  updatedAt: number
+  /** Kept as a tombstone so a stale copy elsewhere can't bring it back. */
+  deleted?: true
+  /** The automatic first setup, never edited: dropped if the server already has games. */
+  fresh?: true
+}
+
+export interface SetupIndex {
+  active: string
+  list: SetupMeta[]
+}
+
+export const SETUP_ID = /^[a-z0-9-]{1,40}$/
+
+/** Lowercase and short enough for the server's id rule; randomUUID needs a secure context, which LAN http isn't. */
+export function newSetupId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+export function parseSetupMeta(raw: unknown): SetupMeta | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const o = raw as Record<string, unknown>
+  const id = str(o.id)
+  if (!SETUP_ID.test(id)) return null
+  const gen = Math.trunc(num(o.gen, 9))
+  return {
+    id,
+    name: str(o.name).trim().slice(0, 60) || 'Untitled game',
+    gen: Math.min(Math.max(gen, 1), 9),
+    updatedAt: num(o.updatedAt, 0),
+    ...(o.deleted === true ? { deleted: true as const } : {}),
+    ...(o.fresh === true ? { fresh: true as const } : {}),
+  }
+}
+
+export const liveSetups = (index: SetupIndex): SetupMeta[] => index.list.filter((s) => !s.deleted)
+
+/**
+ * The list of game setups. First run creates "My game"; an old single save
+ * under the legacy key moves into it, so nobody loses their Pokedex.
+ */
+export function loadSetups(): SetupIndex {
+  const raw = read(INDEX_KEY) as { active?: unknown; list?: unknown } | null
+  const list = Array.isArray(raw?.list)
+    ? raw.list.map(parseSetupMeta).filter((s): s is SetupMeta => s !== null)
+    : []
+
+  if (!list.some((s) => !s.deleted)) {
+    const legacy = read(LEGACY_KEY)
+    const first: SetupMeta = {
+      id: newSetupId(),
+      name: 'My game',
+      gen: 9,
+      updatedAt: Date.now(),
+      ...(legacy === null ? { fresh: true as const } : {}),
+    }
+    if (legacy !== null) {
+      write(stateKey(first.id), legacy)
+      try {
+        localStorage.removeItem(LEGACY_KEY)
+      } catch {
+        // Leaving the old key behind is harmless.
+      }
+    }
+    list.push(first)
+  }
+
+  const live = list.filter((s) => !s.deleted)
+  const active = live.some((s) => s.id === raw?.active) ? (raw!.active as string) : live[0]!.id
+  const index = { active, list }
+  saveSetups(index)
+  return index
+}
+
+export function saveSetups(index: SetupIndex): void {
+  write(INDEX_KEY, index)
 }

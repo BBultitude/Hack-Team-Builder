@@ -43,8 +43,11 @@ const BLOCKS: Record<Effect, string[]> = {
   weaken: [],
 }
 
-/** Capture multiplier for each status, Generation 5 onwards. */
-const STATUS_BONUS: Record<Effect, number> = { sleep: 2.5, paralysis: 1.5, weaken: 1 }
+/** Capture multiplier for each status; sleep was x2 before Generation 5. */
+function statusBonus(effect: Effect, gen: number): number {
+  if (effect === 'sleep') return gen <= 4 ? 2 : 2.5
+  return effect === 'paralysis' ? 1.5 : 1
+}
 
 export interface Helper {
   member: string
@@ -82,18 +85,24 @@ export function catchChance(captureRate: number, ball: number, status: number, h
   return throwChance(captureRate * ball * status * (1 - (2 / 3) * hpFraction))
 }
 
-/** Balls worth carrying for this target, best multiplier first. */
+/** Balls worth carrying for this target that exist in the setup's generation, best multiplier first. */
 export function ballsFor(data: GameData, target: DexEntry, asleep: boolean): Ball[] {
+  const gen = data.gen ?? 9
   const types = target.t.map((t) => data.chart.types[t])
-  const balls: Ball[] = [
-    { name: 'Quick Ball', multiplier: 5, when: 'first turn only' },
-    { name: 'Ultra Ball', multiplier: 2, when: '' },
-    { name: 'Dusk Ball', multiplier: 3, when: 'at night or in caves' },
-    { name: 'Timer Ball', multiplier: 4, when: 'after 10 turns' },
-  ]
-  if (types.includes('Water') || types.includes('Bug')) balls.push({ name: 'Net Ball', multiplier: 3.5, when: '' })
-  if ((target.s[STAT.SPEED] ?? 0) >= 100) balls.push({ name: 'Fast Ball', multiplier: 4, when: '' })
-  if (asleep) balls.push({ name: 'Dream Ball', multiplier: 4, when: 'while asleep, if your hack has it' })
+  const balls: Ball[] = [{ name: 'Ultra Ball', multiplier: 2, when: '' }]
+  if (gen >= 4) {
+    balls.push({ name: 'Quick Ball', multiplier: 5, when: 'first turn only' })
+    balls.push({ name: 'Dusk Ball', multiplier: 3, when: 'at night or in caves' })
+  }
+  if (gen >= 3) {
+    balls.push({ name: 'Timer Ball', multiplier: 4, when: 'after 10 turns' })
+    if (types.includes('Water') || types.includes('Bug')) balls.push({ name: 'Net Ball', multiplier: 3.5, when: '' })
+  }
+  // The Apricorn balls are in Gold/Silver/Crystal and from HeartGold/SoulSilver on, not Gen 3.
+  if ((gen === 2 || gen >= 4) && (target.s[STAT.SPEED] ?? 0) >= 100) {
+    balls.push({ name: 'Fast Ball', multiplier: 4, when: '' })
+  }
+  if (gen >= 5 && asleep) balls.push({ name: 'Dream Ball', multiplier: 4, when: 'while asleep, if your hack has it' })
   return balls.sort((a, b) => b.multiplier - a.multiplier)
 }
 
@@ -148,16 +157,18 @@ export function catchPlan(
 
   const weaken = findHelper(data, roster, team, target, 'weaken')
   const status = findHelper(data, roster, team, target, 'sleep') ?? findHelper(data, roster, team, target, 'paralysis')
-  const statusBonus = status ? STATUS_BONUS[status.effect] : 1
+  const bonus = status ? statusBonus(status.effect, data.gen ?? 9) : 1
   const balls = ballsFor(data, target, status?.effect === 'sleep')
-  const at1Hp = (b: Ball): number => catchChance(target.cr, b.multiplier, statusBonus, weaken ? 0 : 0.5)
+  const at1Hp = (b: Ball): number => catchChance(target.cr, b.multiplier, bonus, weaken ? 0 : 0.5)
   const teach = (h: Helper): string => (h.known ? '' : ` (it can learn ${h.move}; make sure it knows it)`)
   const risk = (h: Helper): string =>
     h.riskyAbilities.length ? ` Won't work if it has ${h.riskyAbilities.join(' or ')}.` : ''
 
   const steps: string[] = []
-  const quick = balls.find((b) => b.name === 'Quick Ball')!
-  steps.push(`Turn 1: throw a Quick Ball (×5) — ${pct(catchChance(target.cr, quick.multiplier, 1, 1))} even at full health.`)
+  const quick = balls.find((b) => b.name === 'Quick Ball')
+  if (quick) {
+    steps.push(`Turn 1: throw a Quick Ball (×5) — ${pct(catchChance(target.cr, quick.multiplier, 1, 1))} even at full health.`)
+  }
 
   if (weaken) {
     steps.push(`${weaken.member} uses False Swipe until it is at 1 HP${teach(weaken)}.`)
@@ -171,7 +182,7 @@ export function catchPlan(
 
   if (status) {
     const what = status.effect === 'sleep' ? 'put it to sleep' : 'paralyse it'
-    steps.push(`${status.member} uses ${status.move} to ${what} (×${statusBonus} catch rate)${teach(status)}.${risk(status)}`)
+    steps.push(`${status.member} uses ${status.move} to ${what} (×${bonus} catch rate)${teach(status)}.${risk(status)}`)
   } else {
     steps.push('Nothing on your roster can put it to sleep or paralyse it; a Spore, Sleep Powder or Thunder Wave user makes this much easier.')
   }

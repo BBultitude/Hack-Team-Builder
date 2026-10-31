@@ -39,6 +39,9 @@ const FILES = [
   'pokemon_moves',
   'natures',
   'nature_names',
+  'pokemon_types_past',
+  'pokemon_abilities_past',
+  'version_groups',
 ] as const
 
 /** English, per PokeAPI's languages.csv. */
@@ -168,7 +171,19 @@ function titleCase(slug: string): string {
     .join(' ')
 }
 
+/**
+ * The commit the cached CSVs came from. Recorded when the cache is first
+ * filled, so a rebuild from cache doesn't claim today's master.
+ */
 async function sourceCommit(): Promise<string> {
+  const file = join(CACHE, 'commit.txt')
+  if (await exists(file)) return (await readFile(file, 'utf8')).trim()
+  const sha = await latestCommit()
+  if (sha !== 'unknown') await writeFile(file, sha)
+  return sha
+}
+
+async function latestCommit(): Promise<string> {
   try {
     const res = await fetch('https://api.github.com/repos/PokeAPI/pokeapi/commits/master')
     if (!res.ok) return 'unknown'
@@ -222,7 +237,7 @@ async function main(): Promise<void> {
     if (r.local_language_id === String(EN)) enMoveName.set(r.move_id!, r.name!)
   }
 
-  type Move = { n: string; t: number; p: number; c: 'physical' | 'special' }
+  type Move = { n: string; t: number; p: number; c: 'physical' | 'special'; g: number }
   const moves: Move[] = []
   /** move_id -> index in `moves`, for learnset compaction. */
   const moveIndexById = new Map<string, number>()
@@ -240,6 +255,7 @@ async function main(): Promise<void> {
       t,
       p: Number(r.power) || 0, // power 0 == variable/fixed damage
       c: cls === PHYSICAL ? 'physical' : 'special',
+      g: Number(r.generation_id) || 1,
     })
   }
 
@@ -248,10 +264,13 @@ async function main(): Promise<void> {
   // Pseudo-moves so hacks that retype or rename moves stay usable.
   const pseudoFrom = moves.length
   typeNames.forEach((name, t) => {
-    moves.push({ n: `Any ${name} move`, t, p: 80, c: 'physical' })
+    // Fairy arrived in Gen 6; the rest exist from the start.
+    moves.push({ n: `Any ${name} move`, t, p: 80, c: 'physical', g: name === 'Fairy' ? 6 : 1 })
   })
 
   // --- species and forms ---------------------------------------------------
+
+  const genOfVersionGroup = new Map(csv.version_groups.map((r) => [r.id!, Number(r.generation_id)]))
 
   const typesByPokemon = groupBy(csv.pokemon_types, 'pokemon_id')
   const statsByPokemon = groupBy(csv.pokemon_stats, 'pokemon_id')
@@ -352,18 +371,55 @@ async function main(): Promise<void> {
 
   dex.sort((a, b) => a.id - b.id)
 
+  // Generation each entry arrived in: the species for base forms, the form's debut otherwise.
+  const speciesGen = new Map(csv.pokemon_species.map((r) => [r.id!, Number(r.generation_id)]))
+  const formGen = new Map<string, number>()
+  for (const r of csv.pokemon_forms) {
+    if (r.is_default !== '1') continue
+    const g = genOfVersionGroup.get(r.introduced_in_version_group_id!)
+    if (g !== undefined) formGen.set(r.pokemon_id!, g)
+  }
+  const genOf = (e: Entry): number =>
+    e.id > 10000 ? (formGen.get(String(e.id)) ?? 9) : (speciesGen.get(String(e.sp)) ?? 9)
+
+  // Types up to and including a past generation, e.g. Clefairy was Normal through Gen 5.
+  const typesPast = new Map<number, [number, number[]][]>()
+  for (const [pid, rows] of groupBy(csv.pokemon_types_past, 'pokemon_id')) {
+    const byGen = new Map<number, Record<string, string>[]>()
+    for (const r of rows) byGen.set(Number(r.generation_id), [...(byGen.get(Number(r.generation_id)) ?? []), r])
+    typesPast.set(Number(pid), [...byGen].sort((a, b) => a[0] - b[0]).map(([g, rs]) => [
+      g,
+      rs.sort((a, b) => Number(a.slot) - Number(b.slot))
+        .map((r) => typeIndexById.get(r.type_id!))
+        .filter((t): t is number => t !== undefined),
+    ]))
+  }
+
+  // Ability slots up to and including a past generation, as [gen, slot, name]; '' means empty.
+  // Hidden slots empty through Gen 4 are dropped: the app removes all hidden abilities before Gen 5.
+  const abilitiesPast = new Map<number, [number, number, string][]>()
+  for (const r of csv.pokemon_abilities_past) {
+    const g = Number(r.generation_id)
+    const name = r.ability_id ? (enAbilityName.get(r.ability_id) ?? '') : ''
+    if (r.is_hidden === '1' && !name && g === 4) continue
+    const pid = Number(r.pokemon_id)
+    abilitiesPast.set(pid, [...(abilitiesPast.get(pid) ?? []), [g, Number(r.slot), name]])
+  }
+
   // --- learnsets -----------------------------------------------------------
 
   // Union across every version group; a hack can teach anything the species
   // ever learned, so version-group fidelity would only lose us options.
-  const learnByPokemon = new Map<number, Set<number>>()
+  // move index -> first generation it was learnable in, per pokemon.
+  const learnByPokemon = new Map<number, Map<number, number>>()
   for (const r of csv.pokemon_moves) {
     const mi = moveIndexById.get(r.move_id!)
     if (mi === undefined) continue
     const pid = Number(r.pokemon_id)
-    const set = learnByPokemon.get(pid)
-    if (set) set.add(mi)
-    else learnByPokemon.set(pid, new Set([mi]))
+    const gen = genOfVersionGroup.get(r.version_group_id!) ?? 9
+    let map = learnByPokemon.get(pid)
+    if (!map) learnByPokemon.set(pid, (map = new Map()))
+    map.set(mi, Math.min(map.get(mi) ?? 9, gen))
   }
 
   // Forms with no rows of their own inherit the base species' set.
@@ -372,13 +428,15 @@ async function main(): Promise<void> {
     if (e.id <= 1025) baseIdBySpecies.set(e.sp, e.id)
   }
 
-  const learnsets: number[][] = dex.map((e) => {
+  const learnMaps = dex.map((e) => {
     const own = learnByPokemon.get(e.id)
-    if (own?.size) return [...own].sort((a, b) => a - b)
+    if (own?.size) return own
     const baseId = baseIdBySpecies.get(e.sp)
-    const inherited = baseId === undefined ? undefined : learnByPokemon.get(baseId)
-    return inherited ? [...inherited].sort((a, b) => a - b) : []
+    return (baseId === undefined ? undefined : learnByPokemon.get(baseId)) ?? new Map<number, number>()
   })
+  const learnsets: number[][] = learnMaps.map((m) => [...m.keys()].sort((a, b) => a - b))
+  // One digit per learnset entry: the first generation it could be learned in.
+  const learnGens: string[] = learnMaps.map((m, i) => learnsets[i]!.map((mi) => m.get(mi)).join(''))
 
   // --- evolution, obtainability, catch moves -----------------------------
 
@@ -501,18 +559,27 @@ async function main(): Promise<void> {
 
   // Learners of each catch-helper move, by dex index, forms inheriting as above.
   const catchMoves: Record<string, number[]> = {}
+  // Parallel to catchMoves: one digit per learner, the first generation it could learn the move.
+  const catchGens: Record<string, string> = {}
   for (const slug of CATCH_MOVES) {
     const row = csv.moves.find((m) => m.identifier === slug)
     if (!row) throw new Error(`missing move ${slug}`)
-    const learners = new Set<number>()
-    for (const r of csv.pokemon_moves) if (r.move_id === row.id) learners.add(Number(r.pokemon_id))
+    const learners = new Map<number, number>()
+    for (const r of csv.pokemon_moves) {
+      if (r.move_id !== row.id) continue
+      const pid = Number(r.pokemon_id)
+      learners.set(pid, Math.min(learners.get(pid) ?? 9, genOfVersionGroup.get(r.version_group_id!) ?? 9))
+    }
     const name = enMoveName.get(row.id!) ?? titleCase(slug)
-    catchMoves[name] = dex
-      .map((e, i) => ({ e, i }))
-      .filter(({ e }) =>
-        learners.has(e.id) ||
-        (!learnByPokemon.get(e.id)?.size && learners.has(baseIdBySpecies.get(e.sp) ?? -1)))
-      .map(({ i }) => i)
+    const found = dex
+      .map((e, i) => {
+        const own = learners.get(e.id)
+        const inherited = learnByPokemon.get(e.id)?.size ? undefined : learners.get(baseIdBySpecies.get(e.sp) ?? -1)
+        return { i, g: own ?? inherited }
+      })
+      .filter((x): x is { i: number; g: number } => x.g !== undefined)
+    catchMoves[name] = found.map((x) => x.i)
+    catchGens[name] = found.map((x) => x.g).join('')
   }
 
   // --- natures -------------------------------------------------------------
@@ -547,15 +614,19 @@ async function main(): Promise<void> {
   const outputs: Record<string, unknown> = {
     'typechart.json': { types: typeNames, matrix },
     'dex.json': dex.map((e, i) => ({
-      n: e.n, t: e.t, s: e.s, ab: e.ab, hab: e.hab,
+      n: e.n, id: e.id, g: genOf(e), t: e.t, s: e.s, ab: e.ab, hab: e.hab,
+      ...(typesPast.has(e.id) ? { pt: typesPast.get(e.id) } : {}),
+      ...(abilitiesPast.has(e.id) ? { pa: abilitiesPast.get(e.id) } : {}),
       cr: captureRate(e.sp),
       fm: chainOf(e.sp),
       ...(ev[i]!.length ? { ev: ev[i], eh: ev[i]!.map((c) => howToEvolve(i, c)) } : {}),
       ...(obtainable(e, i) ? { ok: 1, cf: catchFrom[i] } : {}),
     })),
     'catch.json': catchMoves,
+    'catchgens.json': catchGens,
     'moves.json': moves,
     'learnsets.json': learnsets,
+    'learngens.json': learnGens,
     'natures.json': natures,
     'meta.json': {
       version: 1,

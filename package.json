@@ -10,9 +10,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build:data": "tsx scripts/build-data.ts",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "sprites": "node scripts/fetch-sprites.mjs",
+    "start": "node server/index.mjs"
   },
   "dependencies": {
+    "@fontsource/atkinson-hyperlegible": "5.3.0",
+    "@fontsource/vt323": "5.3.0",
     "preact": "^10.24.3"
   },
   "devDependencies": {

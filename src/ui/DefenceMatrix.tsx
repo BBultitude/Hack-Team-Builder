@@ -75,7 +75,9 @@ export function DefenceMatrix({ data, members, grid }: Props) {
         <tbody>
           {grid.map((row) => (
             <tr key={row.type}>
-              <th scope="row">{typeName(row.type)}</th>
+              <th scope="row">
+                <span class="type" data-t={typeName(row.type)}>{typeName(row.type)}</span>
+              </th>
               {row.cells.map((m, i) => {
                 const text = explain(i, row.type, m)
                 return (

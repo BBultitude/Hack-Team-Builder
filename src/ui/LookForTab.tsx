@@ -4,6 +4,8 @@ import type { Lookup } from '../logic/lookup'
 import { lookFor } from '../logic/team'
 import { evolutionPath } from '../logic/member'
 import { catchPlan } from '../logic/catching'
+import { Types } from './Types'
+import { Sprite } from './Sprite'
 
 interface Props {
   data: GameData
@@ -49,15 +51,17 @@ export function LookForTab(props: Props) {
           return (
             <div key={t.index} class="card">
               <div class="row">
-                <span class="grow truncate">
-                  <strong>{dex.n}</strong>{' '}
-                  <span class="muted">{dex.t.map(typeName).join(' / ')}</span>
+                <Sprite gen={data.gen} id={dex.id} size={96} />
+                <span class="grow" style="min-width:0">
+                  <strong class="truncate" style="display:block">{dex.n}</strong>
+                  <Types data={data} types={dex.t} />
                 </span>
-                <span class="muted good">+{t.gain.toFixed(1)}</span>
+                <span class="good lcd" title="Team score gain">+{t.gain.toFixed(1)}</span>
               </div>
               {t.catchFrom !== t.index && (
                 <p style="margin:0.3rem 0 0">
-                  Look for <strong>{name(t.catchFrom)}</strong>
+                  Look for <Sprite gen={data.gen} id={data.dex[t.catchFrom]?.id} size={32} />
+                  <strong>{name(t.catchFrom)}</strong>
                   {evolutionPath(data, t.catchFrom, t.index).slice(1).map((stage, i, rest) => {
                     const prev = i === 0 ? t.catchFrom : rest[i - 1]!
                     const how = data.dex[prev]?.eh?.[data.dex[prev]?.ev?.indexOf(stage) ?? -1]

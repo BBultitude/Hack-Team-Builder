@@ -14,8 +14,10 @@ export const data: GameData = {
   dex: read('dex.json'),
   moves: read('moves.json'),
   learnsets: read('learnsets.json'),
+  learnGens: read('learngens.json'),
   natures: read('natures.json'),
   catchMoves: read('catch.json'),
+  catchGens: read('catchgens.json'),
 }
 
 export const lookup: Lookup = buildLookup(data)

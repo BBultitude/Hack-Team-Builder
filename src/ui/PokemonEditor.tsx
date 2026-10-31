@@ -3,7 +3,10 @@ import type { GameData, RosterEntry } from '../types'
 import { STAT_NAMES } from '../types'
 import { MODELLED_ABILITIES } from '../logic/abilities'
 import { evolve } from '../logic/member'
+import { MAX_GEN, inGen, moveNames as movesInGen } from '../logic/setup'
 import { Suggest } from './Suggest'
+import { Sprite } from './Sprite'
+import { Types } from './Types'
 
 interface Props {
   data: GameData
@@ -26,14 +29,12 @@ export function PokemonEditor(props: Props) {
 
   const patch = (fields: Partial<RosterEntry>): void => onChange({ ...entry, ...fields })
 
-  const typeName = (i: number): string => data.chart.types[i] ?? '?'
-
   const abilityOptions = [
     ...(vanilla ? [...vanilla.ab, ...vanilla.hab] : []),
     ...MODELLED_ABILITIES.map((a) => a.replace(/\b\w/g, (c) => c.toUpperCase())),
   ].filter((v, i, arr) => arr.indexOf(v) === i)
 
-  const moveNames = data.moves.map((m) => m.n)
+  const moveNames = movesInGen(data)
   const learnable = new Set(
     entry.d >= 0 ? (data.learnsets[entry.d] ?? []).map((i) => data.moves[i]?.n ?? '') : [],
   )
@@ -54,12 +55,10 @@ export function PokemonEditor(props: Props) {
           aria-expanded={props.open}
         >
           <span aria-hidden="true">{props.open ? '▾' : '▸'}</span>
-          <span class="grow truncate">
-            <strong>{entry.n}</strong>{' '}
-            <span class="muted">
-              {entry.a >= 0 ? typeName(entry.a) : ''}
-              {entry.b >= 0 ? ` / ${typeName(entry.b)}` : ''}
-            </span>
+          <Sprite gen={data.gen} id={vanilla?.id} size={56} />
+          <span class="grow" style="min-width:0">
+            <strong class="truncate" style="display:block">{entry.n}</strong>
+            <Types data={data} types={entry.b >= 0 ? [entry.a, entry.b] : [entry.a]} />
           </span>
         </button>
         <button
@@ -80,7 +79,13 @@ export function PokemonEditor(props: Props) {
         </p>
       )}
 
-      {!entry.ab.trim() && (
+      {!inGen(data, entry) && (
+        <p class="muted danger" style="margin:0.4rem 0 0">
+          Not in Generation {data.gen ?? MAX_GEN}. Kept, but left out of Auto-build.
+        </p>
+      )}
+
+      {(data.gen ?? MAX_GEN) >= 3 && !entry.ab.trim() && (
         <p class="muted danger" style="margin:0.4rem 0 0">
           No ability set — defensive numbers may be wrong.
         </p>
@@ -88,16 +93,18 @@ export function PokemonEditor(props: Props) {
 
       {props.open && (
         <div class="editor-body stack">
-          <label class="field">
-            <span>Ability</span>
-            <Suggest
-              value={entry.ab}
-              placeholder="Ability"
-              options={abilityOptions}
-              onInput={(v) => patch({ ab: v })}
-              onPick={(v) => patch({ ab: v })}
-            />
-          </label>
+          {(data.gen ?? MAX_GEN) >= 3 && (
+            <label class="field">
+              <span>Ability</span>
+              <Suggest
+                value={entry.ab}
+                placeholder="Ability"
+                options={abilityOptions}
+                onInput={(v) => patch({ ab: v })}
+                onPick={(v) => patch({ ab: v })}
+              />
+            </label>
+          )}
 
           <label class="field">
             <span>Nature</span>

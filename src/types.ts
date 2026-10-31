@@ -5,6 +5,10 @@ export type DamageClass = 'physical' | 'special'
 export interface DexEntry {
   /** Display name, unique across the dex. */
   n: string
+  /** PokeAPI pokemon id; also keys the sprite. */
+  id: number
+  /** Generation it was introduced in (a form's own debut for alternate forms). */
+  g: number
   /** One or two type indices into TypeChart.types. */
   t: number[]
   /** Six base stats, in STAT order below. */
@@ -25,6 +29,10 @@ export interface DexEntry {
   ok?: 1
   /** With ok: the dex index to catch (this entry, or an easier earlier stage). */
   cf?: number
+  /** Past types: [last generation they applied, types], oldest first. */
+  pt?: [number, number[]][]
+  /** Past ability slots: [last generation, slot 1-3 (3 is hidden), name or '' for empty]. */
+  pa?: [number, number, string][]
 }
 
 export interface Move {
@@ -34,6 +42,8 @@ export interface Move {
   /** Base power; 0 means variable or fixed damage. */
   p: number
   c: DamageClass
+  /** Generation it was introduced in. */
+  g: number
 }
 
 export interface Nature {
@@ -57,9 +67,15 @@ export interface GameData {
   moves: Move[]
   /** learnsets[dexIndex] -> move indices. */
   learnsets: number[][]
+  /** Parallel to learnsets: one digit per entry, the first generation it was learnable. */
+  learnGens: string[]
   natures: Nature[]
   /** Catch-helper move name -> dex indices that can learn it. */
   catchMoves: Record<string, number[]>
+  /** Parallel to catchMoves: one digit per learner, the first generation it could learn it. */
+  catchGens: Record<string, string>
+  /** Newest generation in play; set by forSetup. Absent means every generation (9). */
+  gen?: number
 }
 
 /** Stat slots, fixed by the data generator. */

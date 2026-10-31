@@ -73,55 +73,39 @@ describe('incoming', () => {
   })
 })
 
-describe('score', () => {
-  const formula = (offence: number, incoming: number, speed: number) =>
-    2 * Math.log2(Math.max(offence, 0.1)) - 2 * Math.log2(Math.max(incoming, 0.125)) + speed
-
-  it('matches the published formula', () => {
-    const m = member(own('Golem', { mv: ['Earthquake', '', '', ''] }))
-    const opp = opponentOf('Gengar')
-    const r = rankMember(data, m, opp, 0)
-    const speed = r.faster === null ? 0 : r.faster ? 0.5 : -0.5
-    expect(r.score).toBeCloseTo(formula(r.best!.value, r.worstIncoming!.multiplier, speed))
-  })
-
-  it('floors a total immunity rather than going infinite', () => {
-    const m = member(own('Gengar')) // Normal/Fighting both do nothing to it
-    const r = rankMember(data, m, opponentOf('Snorlax'), 0)
-    expect(Number.isFinite(r.score)).toBe(true)
-    expect(r.worstIncoming!.multiplier).toBe(0)
-  })
-
-  it('rewards being faster', () => {
-    const fast = member(own('Jolteon'))
-    const slow = member(own('Jolteon', { st: [65, 65, 60, 110, 95, 1] }))
-    const opp = opponentOf('Snorlax')
-    expect(rankMember(data, fast, opp, 0).faster).toBe(true)
-    expect(rankMember(data, slow, opp, 0).faster).toBe(false)
-    expect(rankMember(data, fast, opp, 0).score - rankMember(data, slow, opp, 0).score).toBeCloseTo(1)
-  })
-
-  it('uses the member effective Speed against the opponent base Speed', () => {
+describe('speed', () => {
+  it('compares the member effective Speed against the opponent base Speed', () => {
     const timid = data.natures.findIndex((n) => n.n === 'Timid')
     const m = member(own('Jolteon', { nt: timid }))
     expect(data.natures[timid]!.up).toBe(STAT.SPEED)
     expect(rankMember(data, m, opponentOf('Snorlax'), 0).faster).toBe(true)
+    const slow = member(own('Jolteon', { st: [65, 65, 60, 110, 95, 1] }))
+    expect(rankMember(data, slow, opponentOf('Snorlax'), 0).faster).toBe(false)
   })
 })
 
 describe('ranking', () => {
-  it('orders best first and keeps ties stable', () => {
-    const team = [
-      member(own('Alakazam')),                                   // weak to Ghost
-      member(own('Golem', { mv: ['Earthquake', '', '', ''] })),   // hits hard, resists little
-      member(own('Steelix')),
-    ]
-    const ranked = rankMembers(data, team, opponentOf('Gengar'))
-    expect(ranked).toHaveLength(3)
-    for (let i = 1; i < ranked.length; i++) {
-      expect(ranked[i - 1]!.score).toBeGreaterThanOrEqual(ranked[i]!.score)
-    }
-    expect(ranked.at(-1)!.name).toBe('Alakazam')
+  it('puts defence before offence', () => {
+    // Into Gengar: Alakazam takes x2 from Ghost but hits x3 (Psychic x2, STAB).
+    const glass = member(own('Alakazam', { mv: ['Psychic', '', '', ''] }))
+    const steady = member(own('Blastoise', { mv: ['Surf', '', '', ''] })) // takes x1, deals x1.5
+    const ranked = rankMembers(data, [glass, steady], opponentOf('Gengar'))
+    expect(ranked[0]!.best!.value).toBeLessThan(ranked[1]!.best!.value)
+    expect(ranked.map((r) => r.name)).toEqual(['Blastoise', 'Alakazam'])
+  })
+
+  it('sends a member that cannot hurt the opponent last, even if it is immune', () => {
+    const useless = member(own('Snorlax', { mv: ['Body Slam', '', '', ''] })) // Normal into Ghost: x0
+    const ok = member(own('Alakazam', { mv: ['Psychic', '', '', ''] }))
+    const ranked = rankMembers(data, [useless, ok], opponentOf('Gengar'))
+    expect(ranked.at(-1)!.name).toBe('Snorlax')
+  })
+
+  it('uses speed only to break ties, then keeps slot order', () => {
+    const fast = member(own('Jolteon'))
+    const slow = member(own('Jolteon', { st: [65, 65, 60, 110, 95, 1] }))
+    const ranked = rankMembers(data, [slow, fast, slow], opponentOf('Snorlax'))
+    expect(ranked.map((r) => r.slot)).toEqual([1, 0, 2])
   })
 })
 

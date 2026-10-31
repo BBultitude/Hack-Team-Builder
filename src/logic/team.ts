@@ -2,15 +2,18 @@ import type { GameData, Move, RosterEntry } from '../types'
 import type { Lookup } from './lookup'
 import { type Member, entryFromDex, hasStab, incomingMultiplier, resolveMember } from './member'
 import { effectiveness } from './typeChart'
+import { inGen } from './setup'
 
 export const MAX_TEAM = 6
 
-/** Weight on offensive coverage relative to the defensive score. */
-const COVERAGE_WEIGHT = 1.5
+/** Weight on offensive coverage relative to the defensive score. Defence leads, per Design.md section 5. */
+const COVERAGE_WEIGHT = 0.75
 
 /** How many weaknesses on one type before the team-level penalty applies. */
 const STACKED_WEAKNESS_THRESHOLD = 3
 const STACKED_WEAKNESS_PENALTY = 2
+/** A type the team is weak to with nothing resisting it: no safe switch-in. */
+const EXPOSED_PENALTY = 2
 
 export interface TypeExposure {
   type: number
@@ -40,7 +43,7 @@ export interface TeamAnalysis {
 
 /** Scores one member's matchup against one attacking type. */
 function rate(multiplier: number): { weak: number; resist: number; score: number } {
-  if (multiplier >= 3) return { weak: 2, resist: 0, score: -2 }
+  if (multiplier >= 3) return { weak: 2, resist: 0, score: -3 }
   if (multiplier > 1) return { weak: 1, resist: 0, score: -1 }
   if (multiplier === 0) return { weak: 0, resist: 1, score: 1.5 }
   if (multiplier <= 0.5) return { weak: 0, resist: 1, score: 1 }
@@ -66,6 +69,7 @@ export function analyseTeam(data: GameData, members: readonly Member[]): TeamAna
       score += r.score
     }
     if (weak >= STACKED_WEAKNESS_THRESHOLD && weak > resist) score -= STACKED_WEAKNESS_PENALTY
+    if (weak > 0 && resist === 0) score -= EXPOSED_PENALTY
     defensiveScore += score
     grid.push({ type: t, weak, resist, score, cells })
   }
@@ -98,7 +102,8 @@ export function analyseTeam(data: GameData, members: readonly Member[]): TeamAna
     exposed: grid.filter((g) => g.weak > 0 && g.resist === 0).map((g) => g.type),
     score: defensiveScore + COVERAGE_WEIGHT * covered.length,
     roles,
-    membersMissingAbility: members.filter((m) => !m.ability.trim()).map((m) => m.entry.n),
+    // Abilities arrived in Generation 3.
+    membersMissingAbility: (data.gen ?? 9) < 3 ? [] : members.filter((m) => !m.ability.trim()).map((m) => m.entry.n),
   }
 }
 
@@ -128,6 +133,10 @@ function scoreOf(
 export interface Suggestion {
   index: number
   gain: number
+  /** Currently exposed types it would cover defensively. */
+  resists: number[]
+  /** Currently uncovered types it would hit super-effectively. */
+  hits: number[]
 }
 
 /** Roster members not on the team, ranked by what adding them would gain. */
@@ -139,11 +148,17 @@ export function suggestAdditions(
   limit = 3,
 ): Suggestion[] {
   if (team.length >= MAX_TEAM) return []
-  const base = scoreOf(data, lookup, roster, team)
+  const base = analyseRoster(data, lookup, roster, team)
   const out: Suggestion[] = []
   for (let i = 0; i < roster.length; i++) {
-    if (team.includes(i)) continue
-    out.push({ index: i, gain: scoreOf(data, lookup, roster, [...team, i]) - base })
+    if (team.includes(i) || !inGen(data, roster[i]!)) continue
+    const next = analyseRoster(data, lookup, roster, [...team, i])
+    out.push({
+      index: i,
+      gain: next.score - base.score,
+      resists: base.exposed.filter((t) => !next.exposed.includes(t)),
+      hits: base.uncovered.filter((t) => next.covered.includes(t)),
+    })
   }
   // Ties break on roster index so the list is stable between renders.
   out.sort((a, b) => b.gain - a.gain || a.index - b.index)
@@ -287,13 +302,14 @@ export function autoBuild(
   lookup: Lookup,
   roster: readonly RosterEntry[],
 ): number[] {
-  if (roster.length <= MAX_TEAM) return roster.map((_, i) => i)
+  const usable = roster.map((_, i) => i).filter((i) => inGen(data, roster[i]!))
+  if (usable.length <= MAX_TEAM) return usable
 
   const team: number[] = []
   while (team.length < MAX_TEAM) {
     let bestIndex = -1
     let bestScore = -Infinity
-    for (let i = 0; i < roster.length; i++) {
+    for (const i of usable) {
       if (team.includes(i)) continue
       const s = scoreOf(data, lookup, roster, [...team, i])
       if (s > bestScore) {
@@ -315,7 +331,7 @@ export function autoBuild(
     let bestScore = current
 
     for (let slot = 0; slot < team.length; slot++) {
-      for (let cand = 0; cand < roster.length; cand++) {
+      for (const cand of usable) {
         if (team.includes(cand)) continue
         const trial = [...team]
         trial[slot] = cand

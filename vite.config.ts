@@ -4,6 +4,8 @@ import { serviceWorker } from './scripts/sw-plugin.ts'
 
 export default defineConfig({
   plugins: [preact(), serviceWorker()],
+  // `npm start` in another terminal provides the sync API during development.
+  server: { proxy: { '/api': 'http://localhost:3000' } },
   build: {
     target: 'es2020',
     // Keep every data file as a real, separately cacheable request. Vite

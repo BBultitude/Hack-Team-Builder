@@ -26,18 +26,18 @@ function own(name: string, over: Partial<RosterEntry> = {}): RosterEntry {
 const member = (e: RosterEntry) => resolveMember(data, lookup, e)
 
 describe('defensive grid', () => {
-  it('scores a single weakness at -1 and a resistance at +1', () => {
+  it('scores weaknesses, resistances and exposure', () => {
     // Charizard (Fire/Flying) with no ability.
     const m = [member(own('Charizard'))]
     const { grid } = analyseTeam(data, m)
 
     const electric = grid[t('Electric')]!
     expect(electric.weak).toBe(1)
-    expect(electric.score).toBe(-1)
+    expect(electric.score).toBe(-1 - 2) // weak, plus nothing resists it
 
     const rock = grid[t('Rock')]! // x4
     expect(rock.weak).toBe(2)
-    expect(rock.score).toBe(-2)
+    expect(rock.score).toBe(-3 - 2)
 
     const grass = grid[t('Grass')]! // x0.25
     expect(grass.resist).toBe(1)
@@ -81,7 +81,7 @@ describe('defensive grid', () => {
     const withLevitate = analyseTeam(data, [member(own('Gengar', { ab: 'Levitate' }))])
 
     // Ghost/Poison takes double from Ground; Levitate makes it an immunity.
-    expect(withoutAbility.grid[t('Ground')]!.score).toBe(-1)
+    expect(withoutAbility.grid[t('Ground')]!.score).toBe(-1 - 2)
     expect(withLevitate.grid[t('Ground')]!.score).toBe(1.5)
   })
 
@@ -91,7 +91,7 @@ describe('defensive grid', () => {
     const electric = analyseTeam(data, team).grid[t('Electric')]!
     expect(electric.weak).toBe(3)
     expect(electric.resist).toBe(0)
-    expect(electric.score).toBe(-3 - 2) // three singles, plus the -2 penalty
+    expect(electric.score).toBe(-3 - 2 - 2) // three singles, stacked, and exposed
   })
 
   it('withholds the penalty when resistances match the weaknesses', () => {
@@ -131,10 +131,18 @@ describe('offensive coverage', () => {
     expect(a.covered.length + a.uncovered.length).toBe(18)
   })
 
-  it('weights coverage at 1.5 on top of the defensive score', () => {
+  it('weights coverage at 0.75 on top of the defensive score', () => {
     const team = [member(own('Charizard')), member(own('Gengar'))]
     const a = analyseTeam(data, team)
-    expect(a.score).toBeCloseTo(a.defensiveScore + 1.5 * a.covered.length)
+    expect(a.score).toBeCloseTo(a.defensiveScore + 0.75 * a.covered.length)
+  })
+
+  it('prefers a sound defensive pair over a glass-cannon pair with more coverage', () => {
+    // Golem + Jynx hit 12 types but stack 4x weaknesses; the old 1.5 weight preferred them.
+    const sound = analyseTeam(data, [member(own('Alakazam')), member(own('Snorlax'))])
+    const glass = analyseTeam(data, [member(own('Golem')), member(own('Jynx'))])
+    expect(glass.covered.length).toBeGreaterThan(sound.covered.length)
+    expect(sound.score).toBeGreaterThan(glass.score)
   })
 })
 
@@ -253,6 +261,14 @@ describe('suggestions', () => {
     expect(out).toHaveLength(2)
     expect(out[0]!.gain).toBeGreaterThanOrEqual(out[1]!.gain)
     expect(out.map((s) => s.index).sort()).toEqual([1, 2])
+  })
+
+  it('explains what each suggestion covers', () => {
+    // Charizard alone is exposed to Water; Blastoise resists Water and hits Fire/Rock/Ground.
+    const roster = [own('Charizard'), own('Blastoise')]
+    const [s] = suggestAdditions(data, lookup, roster, [0])
+    expect(s!.resists).toContain(t('Water'))
+    expect(s!.hits).toContain(t('Rock'))
   })
 
   it('returns nothing once the team is full', () => {

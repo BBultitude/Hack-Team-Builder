@@ -46,6 +46,8 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
+  // Saved games always come from the network; a cached list would undo other devices' changes.
+  if (url.pathname.startsWith('/api/')) return
 
   // Navigations fall back to the cached shell so a reload works offline.
   if (request.mode === 'navigate') {

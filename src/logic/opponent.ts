@@ -15,12 +15,6 @@ import { describeMultiplier, effectiveness } from './typeChart'
 /** Same-Type Attack Bonus. */
 const STAB = 1.5
 
-/** Floors keep log2 finite when a matchup is a total immunity. */
-const MIN_OFFENCE = 0.1
-const MIN_INCOMING = 0.125
-
-const SPEED_BONUS = 0.5
-
 export interface Opponent {
   name: string
   types: number[]
@@ -50,7 +44,6 @@ export interface Ranking {
   /** Index into the array of members passed in. */
   slot: number
   name: string
-  score: number
   best: OffenceDetail | null
   /** Attack options that land for normal damage, listed separately. */
   neutral: OffenceDetail[]
@@ -98,17 +91,9 @@ export function rankMember(
   const theirSpeed = opponent.stats[STAT.SPEED] ?? 0
   const faster = mySpeed === theirSpeed ? null : mySpeed > theirSpeed
 
-  const offenceValue = Math.max(best?.value ?? 0, MIN_OFFENCE)
-  const incomingValue = Math.max(incoming?.multiplier ?? 0, MIN_INCOMING)
-
-  let score = 2 * Math.log2(offenceValue) - 2 * Math.log2(incomingValue)
-  if (faster === true) score += SPEED_BONUS
-  else if (faster === false) score -= SPEED_BONUS
-
   return {
     slot,
     name: member.entry.n,
-    score,
     best,
     neutral: options.filter((o) => o.multiplier === 1),
     worstIncoming: incoming,
@@ -116,15 +101,30 @@ export function rankMember(
   }
 }
 
-/** Highest score first; ties break on slot so the order is stable. */
+const speedRank = (r: Ranking): number => (r.faster === true ? 0 : r.faster === null ? 1 : 2)
+
+/**
+ * Defence first: taking small hits and dealing small hits beats trading
+ * one-shots. Order: can it hurt the opponent at all, least damage taken,
+ * most damage dealt, faster, then slot so the order is stable.
+ */
 export function rankMembers(
   data: GameData,
   members: readonly Member[],
   opponent: Opponent,
 ): Ranking[] {
+  const deals = (r: Ranking): number => r.best?.value ?? 0
+  const takes = (r: Ranking): number => r.worstIncoming?.multiplier ?? 1
   return members
     .map((m, i) => rankMember(data, m, opponent, i))
-    .sort((a, b) => b.score - a.score || a.slot - b.slot)
+    .sort(
+      (a, b) =>
+        Number(deals(a) === 0) - Number(deals(b) === 0) ||
+        takes(a) - takes(b) ||
+        deals(b) - deals(a) ||
+        speedRank(a) - speedRank(b) ||
+        a.slot - b.slot,
+    )
 }
 
 export interface LearningTip {
