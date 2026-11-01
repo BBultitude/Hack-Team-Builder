@@ -105,7 +105,12 @@ export function TeamTab(props: Props) {
                 const knows = (name: string): boolean => m.moves.some((mv) => mv.n === name)
                 // Entered attacks the plan leaves out, each paired with a taught move to take its slot.
                 const spare = recs ? m.moves.filter((mv) => mv.p > 0 && !recs.some((r) => r.move.n === mv.n)) : []
-                const taught = recs ? recs.filter((r) => !knows(r.move.n)) : []
+                // Same type first, so Ember pairs with Flamethrower rather than whatever comes next.
+                const untaught = recs ? recs.filter((r) => !knows(r.move.n)) : []
+                const pairs = spare.map((old) => {
+                  const i = Math.max(untaught.findIndex((r) => r.move.t === old.t), 0)
+                  return { old, rec: untaught.splice(i, 1)[0] }
+                })
                 const kept = keptMoves(m)
                 const drivers = [
                   m.role,
@@ -141,12 +146,11 @@ export function TeamTab(props: Props) {
                     {kept.length > 0 && (
                       <p class="muted" style="margin:0.2rem 0 0">Keeps: {kept.join(', ')}.</p>
                     )}
-                    {spare.map((old, i) => {
-                      const rec = taught[i]
+                    {pairs.map(({ old, rec }, i) => {
                       if (!rec) return null
                       const why = swapReasons(data, m, old, rec)
                       return (
-                        <p key={old.n} style="margin:0.2rem 0 0">
+                        <p key={i} style="margin:0.2rem 0 0">
                           Swap <strong>{old.n}</strong> → <strong>{rec.move.n}</strong>
                           <span class="muted">
                             : {why.length ? why.join('; ') : `close call, keeping ${old.n} costs little`}.

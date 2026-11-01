@@ -4,6 +4,7 @@ import { buildLookup } from '../logic/lookup'
 import { MAX_TEAM } from '../logic/team'
 import {
   EMPTY_STATE,
+  INDEX_KEY,
   type Hack,
   type RankScope,
   type SetupIndex,
@@ -12,11 +13,13 @@ import {
   load,
   loadRaw,
   loadSetups,
+  readSetups,
   newSetupId,
   removeState,
   save,
   saveRaw,
   saveSetups,
+  stateKey,
   serialiseState,
 } from '../logic/storage'
 import { adaptRoster, forSetup, runFilter, withHack } from '../logic/setup'
@@ -35,6 +38,9 @@ type Tab = 'dex' | 'team' | 'look' | 'opponent'
 
 /** Unbound's middle trainer difficulty, used until the player picks one. */
 const DEFAULT_DIFFICULTY = 'expert'
+
+/** The open game: the index's active one, or the first live one if that is gone. */
+const activeOf = (index: SetupIndex): SetupMeta => liveSetups(index).find((s) => s.id === index.active) ?? liveSetups(index)[0]!
 
 /** A text box has focus: the player is mid-edit. Pickers and ticks commit at once, so they don't count. */
 const isEditing = (): boolean => document.activeElement?.matches('input:not([type=checkbox], [type=radio]), textarea') ?? false
@@ -83,7 +89,7 @@ export function App() {
   /** A sync asked for while a field had focus, run when it loses focus. */
   const editPending = useRef(false)
 
-  const active: SetupMeta = liveSetups(setups).find((s) => s.id === setups.active) ?? liveSetups(setups)[0]!
+  const active = activeOf(setups)
   const pack = active.hack && packed?.hack === active.hack ? packed.pack : null
   // Until the active hack's pack arrives there is no data, so nothing restores against the wrong dex.
   const hacked = useMemo(
@@ -145,7 +151,9 @@ export function App() {
 
   useEffect(() => {
     if (!data || !lookup || restored) return
-    const saved = load(data, lookup, active.id)
+    // From the ref, not this render's `active`: two reloads in quick succession (another tab deleting the
+    // open game) can run an older render's effect, which would load the deleted game under the new one.
+    const saved = load(data, lookup, activeOf(setupsRef.current).id)
     lastSaved.current = JSON.stringify(serialiseState(saved))
     setRoster(saved.roster)
     setTeam(saved.team)
@@ -175,10 +183,13 @@ export function App() {
 
   const stampOf = (index: SetupIndex): number => Math.max(...index.list.map((s) => s.updatedAt))
 
-  const runSync = async (): Promise<void> => {
+  /** `force` skips the mid-edit wait: for a hidden page, where nobody is typing and the OS may freeze it next. */
+  const runSync = async (force = false): Promise<void> => {
     // Mid-edit, wait: a pull could reload the open game under the box being typed in. Leaving the field syncs.
-    if (isEditing()) {
+    if (!force && isEditing()) {
       editPending.current = true
+      // Only when something is waiting to go up: coming back with the cursor still in a box has nothing to send.
+      if (stampOf(setupsRef.current) > syncedStamp.current) setSync('saving')
       return
     }
     if (syncing.current) {
@@ -193,6 +204,7 @@ export function App() {
       // What the server now has; edits made while this was in flight are newer and still get pushed.
       syncedStamp.current = stampOf(index)
       saveSetups(merged)
+      setupsRef.current = merged
       setSetupsState(merged)
       // The open game changed on the server, or was deleted there: reload it from the browser copy.
       if (pulled.includes(setupsRef.current.active) || merged.active !== setupsRef.current.active) setRestored(false)
@@ -205,15 +217,26 @@ export function App() {
       syncing.current = false
       if (syncAgain.current) {
         syncAgain.current = false
-        void runSync()
+        void runSync(document.visibilityState === 'hidden')
       }
     }
   }
 
   useEffect(() => {
     void runSync()
-    const onFocus = (): void => {
-      if (document.visibilityState === 'visible') void runSync()
+    // Back in view: pull. Going out of view (phone locked, app switched): push, even mid-edit.
+    const onFocus = (): void => void runSync(document.visibilityState === 'hidden')
+    // Another tab wrote: take its games list, and reload the open game if that tab changed it,
+    // so this tab never writes a stale copy over the other's edits.
+    const onStorage = (e: StorageEvent): void => {
+      if (e.key === INDEX_KEY) {
+        // Read only: writing it back would bounce one more event to the other tab.
+        const merged = mergeIndex(setupsRef.current, { active: setupsRef.current.active, list: readSetups().list })
+        // The open game was deleted there: reload whichever is open now, or its Pokédex would be saved over that one.
+        if (merged.active !== setupsRef.current.active) setRestored(false)
+        setupsRef.current = merged
+        setSetupsState(merged)
+      } else if (e.key === stateKey(setupsRef.current.active)) setRestored(false)
     }
     const onLeaveField = (): void => {
       if (!editPending.current) return
@@ -224,7 +247,9 @@ export function App() {
     window.addEventListener('focus', onFocus)
     document.addEventListener('visibilitychange', onFocus)
     document.addEventListener('focusout', onLeaveField)
+    window.addEventListener('storage', onStorage)
     return () => {
+      window.removeEventListener('storage', onStorage)
       document.removeEventListener('focusout', onLeaveField)
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', onFocus)
@@ -272,14 +297,15 @@ export function App() {
   }
 
   /** Switches the hack, moving to its generation cap and bringing the Pokedex over to its data. */
-  const changeHack = async (hack: Hack | undefined): Promise<void> => {
-    if (!vanilla || !data || hack === active.hack) return
+  /** Gives a vanilla game (one saved before hack data existed) its hack; set once, never changed. */
+  const changeHack = async (hack: Hack): Promise<void> => {
+    if (!vanilla || !data || active.hack) return
+    // Rogue's roster is the party; the picker already blocks a bigger game, this keeps it that way.
+    if (hack === 'rogue' && roster.length > MAX_TEAM) return
     try {
-      const next = hack ? await loadHack(hack) : null
-      const gen = next?.gen ?? active.gen
-      if (hack && next) setPacked({ hack, pack: next })
-      // Rogue never kept a team (the whole roster was the party), so carry the party over as one.
-      if (active.hack === 'rogue') setTeam(roster.map((_, i) => i).slice(0, MAX_TEAM))
+      const next = await loadHack(hack)
+      const gen = next.gen ?? active.gen
+      setPacked({ hack, pack: next })
       setRoster(adaptRoster(data, forSetup(withHack(vanilla, next), gen), roster))
       patchActive({ hack, gen })
     } catch (e) {
@@ -425,6 +451,7 @@ export function App() {
                 onDifficulty={(d) => patchActive({ difficulty: d })}
                 onCreate={createSetup}
                 onDelete={deleteActive}
+                owned={roster.length}
               />
             )}
             {tab === 'dex' && partyOnly && (

@@ -8,7 +8,7 @@ export const DAYCARE_SLOTS = 3
 
 /** Before game setups there was one save under this key; it migrates into the first setup. */
 const LEGACY_KEY = 'ptb2'
-const INDEX_KEY = 'ptb2:setups'
+export const INDEX_KEY = 'ptb2:setups'
 export const stateKey = (id: string): string => `ptb2:s:${id}`
 
 export type RankScope = 'team' | 'all'
@@ -293,15 +293,22 @@ export function parseSetupMeta(raw: unknown): SetupMeta | null {
 
 export const liveSetups = (index: SetupIndex): SetupMeta[] => index.list.filter((s) => !s.deleted)
 
+/** The stored list of game setups as it is, without creating or writing anything. */
+export function readSetups(): { active: unknown; list: SetupMeta[] } {
+  const raw = read(INDEX_KEY) as { active?: unknown; list?: unknown } | null
+  const list = Array.isArray(raw?.list)
+    ? raw.list.map(parseSetupMeta).filter((s): s is SetupMeta => s !== null)
+    : []
+  return { active: raw?.active, list }
+}
+
 /**
  * The list of game setups. First run creates "My game"; an old single save
  * under the legacy key moves into it, so nobody loses their Pokedex.
  */
 export function loadSetups(): SetupIndex {
-  const raw = read(INDEX_KEY) as { active?: unknown; list?: unknown } | null
-  const list = Array.isArray(raw?.list)
-    ? raw.list.map(parseSetupMeta).filter((s): s is SetupMeta => s !== null)
-    : []
+  const raw = readSetups()
+  const list = raw.list
 
   if (!list.some((s) => !s.deleted)) {
     const legacy = read(LEGACY_KEY)
@@ -324,7 +331,7 @@ export function loadSetups(): SetupIndex {
   }
 
   const live = list.filter((s) => !s.deleted)
-  const active = live.some((s) => s.id === raw?.active) ? (raw!.active as string) : live[0]!.id
+  const active = live.some((s) => s.id === raw.active) ? (raw.active as string) : live[0]!.id
   const index = { active, list }
   saveSetups(index)
   return index

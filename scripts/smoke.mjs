@@ -12,7 +12,9 @@ const url = process.argv[2] ?? 'http://localhost:5173'
 const executablePath = process.env.CHROME_PATH ?? '/usr/bin/chromium'
 
 const browser = await chromium.launch({ executablePath })
-const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
+// A context, not browser.newPage, so a second tab can share its storage.
+const context = await browser.newContext({ viewport: { width: 390, height: 844 } })
+const page = await context.newPage()
 
 const errors = []
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
@@ -374,6 +376,21 @@ await step('an Unbound game offers boss teams and rates damage by level', async 
   console.log('        ' + best.replace(/\n+/g, ' | ').slice(0, 220))
 })
 
+await step('sync waits while a box has focus and runs on leaving it', async () => {
+  const isPut = (r) => r.method() === 'PUT' && r.url().includes('/api/setups/')
+  let puts = 0
+  const count = (r) => { if (isPut(r)) puts++ }
+  page.on('request', count)
+  const teamLevel = page.locator('label:has-text("Your team\'s level") input')
+  await teamLevel.fill('33')
+  await page.waitForTimeout(1500)
+  page.off('request', count)
+  if (puts) throw new Error(`${puts} saves sent while the box still had focus`)
+  const sent = page.waitForRequest(isPut, { timeout: 3000 })
+  await teamLevel.blur()
+  await sent
+})
+
 await step('an Emerald Rogue game tracks the overworld, Day Care and a six-Pokémon party', async () => {
   await page.click('button[role="tab"]:has-text("Pokédex")')
   if (!(await page.locator('button:text-is("New game")').isVisible())) await page.locator('summary:has-text("Game setup")').click()
@@ -445,6 +462,60 @@ await step('the Dex header and party stay put while the screen scrolls', async (
   await page.evaluate(() => window.scrollTo(0, 0))
 })
 
+await step('only a vanilla game picks hack data, and not Rogue with more than six owned', async () => {
+  // Still on "My game": vanilla, eight caught.
+  const picker = page.locator('label:has(> span:text-is("Hack data")):not(.sub-panel *) select')
+  const rogue = picker.locator('option[value="rogue"]')
+  if (!(await rogue.evaluate((o) => o.disabled))) throw new Error(`Emerald Rogue offered for an eight-Pokémon game: ${await picker.evaluate((s) => s.outerHTML)}`)
+  await page.locator('.setup-pick select').selectOption({ label: 'Pokémon Unbound · Gen 8' })
+  await page.waitForSelector('button[aria-pressed]:text-is("Regional")', { timeout: 10000 })
+  if (await picker.count()) throw new Error('a game that has hack data can still change it')
+  await page.locator('.setup-pick select').selectOption({ label: 'My game · Gen 9' })
+  await waitCaught(8)
+})
+
+await step('a game made in another tab survives an edit in this one', async () => {
+  const other = await page.context().newPage()
+  await other.goto(url, { waitUntil: 'networkidle' })
+  await other.waitForSelector('.dex-row', { timeout: 10000 })
+  if (!(await other.locator('button:text-is("New game")').isVisible())) await other.locator('summary:has-text("Game setup")').click()
+  await other.click('button:text-is("New game")')
+  await other.fill('input[placeholder="Pokémon Unbound"]', 'Other tab')
+  await other.click('button:text-is("Create game")')
+  await other.waitForTimeout(300)
+  await other.close()
+  // An edit here used to write this tab's older games list back over the other tab's.
+  await tick('Pidgey')
+  await page.reload({ waitUntil: 'networkidle' })
+  const games = await page.locator('.setup-pick option').allTextContents()
+  if (!games.some((g) => g.startsWith('Other tab'))) throw new Error(`games after the edit: ${games.join(', ')}`)
+  await tick('Pidgey')
+})
+
+await step('deleting the open game in another tab reloads this one instead of saving over another game', async () => {
+  const mine = await caught()
+  const before = await page.locator('.setup-pick select option:checked').innerText()
+  await page.locator('.setup-pick select').selectOption({ label: 'Other tab · Gen 9' })
+  // A tick before the switched-to game has loaded would be wiped by the load.
+  await waitCaught(0)
+  await page.waitForTimeout(300)
+  await tick('Bulbasaur')
+  await waitCaught(1).catch(async () => { throw new Error(`after ticking: ${await caught()} caught`) })
+  const other = await page.context().newPage()
+  await other.goto(url, { waitUntil: 'networkidle' })
+  await other.waitForSelector('.dex-row', { timeout: 10000 })
+  if ((await other.locator('.setup-pick select option:checked').innerText()) !== 'Other tab · Gen 9') throw new Error('second tab did not open the same game')
+  if (!(await other.locator('button:text-is("Delete game")').isVisible())) await other.locator('summary:has-text("Game setup")').click()
+  await other.click('button:text-is("Delete game")')
+  await other.click('button:text-is("Yes, delete Other tab")')
+  await other.waitForTimeout(300)
+  await other.close()
+  // This tab must now show the game it fell back to, with that game's own Pokédex.
+  await waitCaught(mine).catch(async () => {
+    throw new Error(`was ${mine} caught in ${before}; after the delete ${await caught()} in ${await page.locator('.setup-pick select option:checked').innerText()}`)
+  })
+})
+
 await step('no horizontal overflow at 390px', async () => {
   const over = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -453,20 +524,40 @@ await step('no horizontal overflow at 390px', async () => {
 })
 
 await step('on a landscape tablet the tabs sit under the header and cards go two across', async () => {
-  await page.setViewportSize({ width: 1180, height: 820 })
+  // Pixel Tablet landscape, in CSS pixels.
+  await page.setViewportSize({ width: 1280, height: 800 })
   await page.click('button[role="tab"]:has-text("Team")')
   await page.waitForTimeout(200)
   const box = await page.evaluate(() => ({
     tabs: document.querySelector('.tabs').getBoundingClientRect(),
     head: document.querySelector('.shell-top').getBoundingClientRect(),
-    over: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     columns: getComputedStyle(document.querySelector('.cards')).gridTemplateColumns.split(' ').length,
   }))
   if (box.tabs.bottom > box.head.bottom + 1) throw new Error(`tabs at ${box.tabs.top}, header ends ${box.head.bottom}`)
-  if (box.over > 0) throw new Error(`page scrolls ${box.over}px horizontally`)
   if (box.columns !== 2) throw new Error(`${box.columns} card columns`)
   await page.screenshot({ path: process.env.SHOT_WIDE ?? '/tmp/smoke-wide.png' })
   await page.setViewportSize({ width: 390, height: 844 })
+})
+
+await step('the app fills the whole window on tablets and phones, either way round', async () => {
+  // Pixel Tablet landscape and portrait, a landscape phone, a portrait phone.
+  for (const [width, height] of [[1280, 800], [800, 1280], [844, 390], [390, 844]]) {
+    await page.setViewportSize({ width, height })
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await page.waitForTimeout(150)
+    const got = await page.evaluate(() => ({
+      dex: document.querySelector('.dex').getBoundingClientRect(),
+      head: document.querySelector('.shell-top').getBoundingClientRect(),
+      over: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    }))
+    const at = `${width}x${height}`
+    if (Math.abs(got.dex.width - width) > 1) throw new Error(`${at}: app is ${got.dex.width}px wide`)
+    if (Math.abs(got.head.width - width) > 1) throw new Error(`${at}: header is ${got.head.width}px wide`)
+    if (got.dex.bottom < height - 1) throw new Error(`${at}: app ends at ${got.dex.bottom}px`)
+    if (Math.abs(got.head.top) > 1) throw new Error(`${at}: header starts at ${got.head.top}px`)
+    if (got.over > 0) throw new Error(`${at}: page scrolls ${got.over}px sideways`)
+    if (width === 800) await page.screenshot({ path: process.env.SHOT_TALL ?? '/tmp/smoke-portrait.png' })
+  }
 })
 
 await step('no console errors or failed requests', async () => {

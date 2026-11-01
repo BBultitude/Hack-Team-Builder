@@ -69,7 +69,8 @@ export function LookForTab(props: Props) {
                 </span>
                 <span class="good lcd" title="Team score gain">+{t.gain.toFixed(1)}</span>
               </div>
-              {t.replaces !== undefined && roster[t.replaces] && (
+              {/* With no team picked, the full six is only the auto-built one: nothing of the player's to swap out. */}
+              {t.replaces !== undefined && roster[t.replaces] && (props.allow || team.length > 0) && (
                 <p style="margin:0.3rem 0 0">
                   <strong>{props.allow ? 'Replaces' : 'Swap out'}</strong>{' '}
                   <Sprite gen={data.gen} id={data.dex[roster[t.replaces]!.d]?.id} size={32} />

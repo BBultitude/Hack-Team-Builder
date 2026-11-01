@@ -56,6 +56,13 @@ describe('damage estimate', () => {
     const band = estimate(data, battler('Garchomp', 50, { item: 'Choice Band' }), battler('Snorlax', 50), move('Earthquake'))!
     expect(band.max).toBeGreaterThan(plain.max * 1.4)
   })
+
+  it('applies Hustle to physical hits only, as move recommendations do', () => {
+    const hit = (ability: string, name: string) =>
+      estimate(data, battler('Garchomp', 50, { ability }), battler('Snorlax', 50), move(name))!.max
+    expect(hit('Hustle', 'Earthquake')).toBeGreaterThan(hit('', 'Earthquake') * 1.4)
+    expect(hit('Hustle', 'Flamethrower')).toBe(hit('', 'Flamethrower'))
+  })
 })
 
 describe('the reported case: neutral hits from a stronger boss', () => {

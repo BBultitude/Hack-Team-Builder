@@ -96,6 +96,18 @@ describe('setups API', () => {
     expect(json(stale).name).toBe('New')
   })
 
+  it('keeps the newer copy when two saves of one game arrive together', async () => {
+    const ids = ['race-1', 'race-2', 'race-3', 'race-4', 'race-5']
+    await Promise.all(
+      ids.flatMap((id) => [
+        call(app.port, 'PUT', `/api/setups/${id}`, { body: setup({ updatedAt: 2000, name: 'New' }) }),
+        call(app.port, 'PUT', `/api/setups/${id}`, { body: setup({ updatedAt: 1000, name: 'Old' }) }),
+      ]),
+    )
+    for (const id of ids) expect(json(await call(app.port, 'GET', `/api/setups/${id}`)).name).toBe('New')
+    expect((await readdir(data)).filter((f) => f.endsWith('.tmp'))).toEqual([])
+  })
+
   it('a delete leaves a tombstone that an older copy cannot overwrite', async () => {
     await call(app.port, 'PUT', '/api/setups/game-3', { body: setup({ updatedAt: 1000 }) })
     expect((await call(app.port, 'DELETE', '/api/setups/game-3')).status).toBe(200)

@@ -9,7 +9,7 @@ import { createServer } from 'node:http'
 import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { timingSafeEqual } from 'node:crypto'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { gzipSync } from 'node:zlib'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -109,6 +109,17 @@ export function createApp({ distDir = join(ROOT, 'dist'), dataDir = join(ROOT, '
 
   const fileFor = (id) => join(store, `${id}.json`)
 
+  /** id -> tail of its write chain: one game's saves run one at a time, so the newer-wins check can't race. */
+  const queue = new Map()
+  const serial = (id, fn) => {
+    const run = (queue.get(id) ?? Promise.resolve()).then(fn)
+    const tail = run.catch(() => {})
+    queue.set(id, tail)
+    // Drop the entry once idle, so the map holds only games being saved right now.
+    tail.then(() => queue.get(id) === tail && queue.delete(id))
+    return run
+  }
+
   async function readSetup(id) {
     try {
       return JSON.parse(await readFile(fileFor(id), 'utf8'))
@@ -120,7 +131,8 @@ export function createApp({ distDir = join(ROOT, 'dist'), dataDir = join(ROOT, '
   async function writeSetup(setup) {
     await mkdir(store, { recursive: true })
     // Write then rename, so a crash can never leave a half-written save.
-    const tmp = `${fileFor(setup.id)}.${process.pid}.tmp`
+    // Unique per write, so two saves of one game never share a temp file.
+    const tmp = `${fileFor(setup.id)}.${randomBytes(4).toString('hex')}.tmp`
     await writeFile(tmp, JSON.stringify(setup))
     await rename(tmp, fileFor(setup.id))
   }
@@ -162,15 +174,16 @@ export function createApp({ distDir = join(ROOT, 'dist'), dataDir = join(ROOT, '
     }
 
     if (req.method === 'PUT' || req.method === 'DELETE') {
-      const current = await readSetup(id)
-      const next =
-        req.method === 'PUT'
-          ? validSetup(id, await readBody(req))
-          : { id, name: current?.name ?? '', gen: current?.gen ?? 9, updatedAt: Date.now(), deleted: true }
-      // Last write wins; an older copy (including one racing a delete) gets the newer one back.
-      if (current && current.updatedAt > next.updatedAt) return sendJson(res, 409, current)
-      await writeSetup(next)
-      return sendJson(res, 200, next)
+      const body = req.method === 'PUT' ? validSetup(id, await readBody(req)) : null
+      const [status, out] = await serial(id, async () => {
+        const current = await readSetup(id)
+        const next = body ?? { id, name: current?.name ?? '', gen: current?.gen ?? 9, updatedAt: Date.now(), deleted: true }
+        // Last write wins; an older copy (including one racing a delete) gets the newer one back.
+        if (current && current.updatedAt > next.updatedAt) return [409, current]
+        await writeSetup(next)
+        return [200, next]
+      })
+      return sendJson(res, status, out)
     }
 
     return sendJson(res, 405, { error: 'Method not allowed' })

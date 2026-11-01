@@ -35,8 +35,11 @@ const REDUCE_SUPER_EFFECTIVE = new Set(['filter', 'solid rock', 'prism armor'])
 
 const WONDER_GUARD = 'wonder guard'
 
+/** Attack-stat multipliers on physical moves, shared by the damage estimate and move recommendations. */
+export const PHYSICAL_BOOST: Record<string, number> = { 'huge power': 2, 'pure power': 2, 'hustle': 1.5, 'gorilla tactics': 1.5 }
+
 /** Attacker abilities that steer move recommendations; see attackAbility. */
-export const ATTACK_ABILITIES = new Set(['huge power', 'pure power', 'hustle', 'gorilla tactics', 'technician', 'adaptability'])
+export const ATTACK_ABILITIES = new Set([...Object.keys(PHYSICAL_BOOST), 'technician', 'adaptability'])
 
 /** Every ability this app understands, for the "ability not modelled" hint. */
 export const MODELLED_ABILITIES: string[] = [
@@ -98,13 +101,14 @@ export function applyDefensiveAbility(
  * Attacker abilities that change which attack is strongest, for move
  * recommendations. Only ones the move data can judge: flag-based boosts
  * (Iron Fist, Strong Jaw…) need move flags it doesn't have. The damage
- * estimate applies the same multipliers its own way, per step of the formula.
+ * estimate shares PHYSICAL_BOOST and applies Technician and Adaptability at
+ * their own steps of the formula.
  */
 export function attackAbility(ability: string, move: Move, stab: boolean): { factor: number; cause: string | null } {
   const key = ability.trim().toLowerCase()
   const physical = move.c === 'physical'
-  if (physical && (key === 'huge power' || key === 'pure power')) return { factor: 2, cause: ability }
-  if (physical && (key === 'hustle' || key === 'gorilla tactics')) return { factor: 1.5, cause: ability }
+  const boost = physical ? PHYSICAL_BOOST[key] : undefined
+  if (boost) return { factor: boost, cause: ability }
   if (key === 'technician' && move.p <= 60) return { factor: 1.5, cause: ability }
   // Adaptability raises the same-type bonus from ×1.5 to ×2.
   if (key === 'adaptability' && stab) return { factor: 2 / 1.5, cause: ability }

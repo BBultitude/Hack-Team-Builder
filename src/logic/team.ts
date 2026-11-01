@@ -207,7 +207,10 @@ export function attackStat(m: Member, move: Move): number {
  */
 export function effectivePower(m: Member, move: Move): number {
   const stab = hasStab(m, move.t)
-  const best = Math.max(attackStat(m, { ...move, c: 'physical' }), attackStat(m, { ...move, c: 'special' }))
+  const best = Math.max(
+    effectiveStat(m.stats[STAT.ATTACK] ?? 0, STAT.ATTACK, m.nature),
+    effectiveStat(m.stats[STAT.SP_ATTACK] ?? 0, STAT.SP_ATTACK, m.nature),
+  )
   const statFit = best > 0 ? attackStat(m, move) / best : 1
   return move.p * (stab ? 1.5 : 1) * attackAbility(m.ability, move, stab).factor * statFit
 }

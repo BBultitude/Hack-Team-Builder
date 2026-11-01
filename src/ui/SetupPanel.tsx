@@ -2,13 +2,15 @@ import { useState } from 'preact/hooks'
 import type { HackPack } from '../types'
 import { HACKS, type Hack, type SetupMeta } from '../logic/storage'
 import { MAX_GEN, genNotes } from '../logic/setup'
+import { MAX_TEAM } from '../logic/team'
 
 interface Props {
   setups: SetupMeta[]
   active: SetupMeta
   onRename: (name: string) => void
   onGen: (gen: number) => void
-  onHack: (hack: Hack | undefined) => void
+  /** Gives a vanilla game hack data; a game's hack can't change after that. */
+  onHack: (hack: Hack) => void
   /** Trainer difficulties the active hack's data has, in game order; empty when it has no boss teams. */
   difficulties: NonNullable<HackPack['difficulties']>
   difficulty: NonNullable<HackPack['difficulties']>[number] | undefined
@@ -16,6 +18,8 @@ interface Props {
   /** Creates a setup and switches to it; copyFrom duplicates that setup's Pokedex and team. */
   onCreate: (name: string, gen: number, hack: Hack | undefined, copyFrom?: string) => void
   onDelete: () => void
+  /** How many Pokémon the active game owns. */
+  owned: number
 }
 
 export const HACK_NAMES: Record<Hack, string> = { unbound: 'Pokémon Unbound', rogue: 'Emerald Rogue' }
@@ -23,7 +27,12 @@ export const HACK_NAMES: Record<Hack, string> = { unbound: 'Pokémon Unbound', r
 /** Generation each hack's Pokemon go up to, suggested when it is picked. */
 const HACK_GENS: Record<Hack, number> = { unbound: 8, rogue: 9 }
 
-function HackSelect(props: { value: Hack | undefined; onChange: (hack: Hack | undefined) => void }) {
+function HackSelect(props: {
+  value: Hack | undefined
+  onChange: (hack: Hack | undefined) => void
+  /** Rogue's whole roster is the party, so a game with more than six owned can't become one. */
+  blockRogue?: boolean
+}) {
   return (
     <select
       value={props.value ?? ''}
@@ -31,7 +40,10 @@ function HackSelect(props: { value: Hack | undefined; onChange: (hack: Hack | un
     >
       <option value="">Vanilla (no hack data)</option>
       {HACKS.map((h) => (
-        <option key={h} value={h}>{HACK_NAMES[h]}</option>
+        <option key={h} value={h} disabled={props.blockRogue && h === 'rogue'}>
+          {HACK_NAMES[h]}
+          {props.blockRogue && h === 'rogue' ? ' (new game only)' : ''}
+        </option>
       ))}
     </select>
   )
@@ -96,11 +108,14 @@ export function SetupPanel(props: Props) {
             onChange={(e) => props.onRename(e.currentTarget.value.trim() || active.name)}
           />
         </label>
-        <label class="field">
-          <span>Hack data</span>
-          <HackSelect value={active.hack} onChange={props.onHack} />
-          <span class="muted">Types, stats, abilities and boss teams from the hack's own sources.</span>
-        </label>
+        {/* Only for games saved before hack data existed: a game's hack is fixed once set. */}
+        {!active.hack && (
+          <label class="field">
+            <span>Hack data</span>
+            <HackSelect value={active.hack} onChange={(h) => h && props.onHack(h)} blockRogue={props.owned > MAX_TEAM} />
+            <span class="muted">Types, stats, abilities and boss teams from the hack's own sources.</span>
+          </label>
+        )}
         {props.difficulties.length > 0 && (
           <label class="field">
             <span>Trainer difficulty</span>

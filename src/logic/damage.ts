@@ -1,6 +1,6 @@
 import type { GameData, Move, Nature } from '../types'
 import { STAT } from '../types'
-import { applyDefensiveAbility } from './abilities'
+import { PHYSICAL_BOOST, applyDefensiveAbility } from './abilities'
 import { effectiveness } from './typeChart'
 
 /**
@@ -71,7 +71,7 @@ function attackBoost(a: Battler, physical: boolean): number {
   const ability = a.ability.trim().toLowerCase()
   let m = 1
   if (item === (physical ? 'choice band' : 'choice specs')) m *= 1.5
-  if (physical && (ability === 'huge power' || ability === 'pure power')) m *= 2
+  if (physical) m *= PHYSICAL_BOOST[ability] ?? 1
   return m
 }
 
