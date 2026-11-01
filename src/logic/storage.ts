@@ -43,6 +43,8 @@ export interface SavedState {
   daycare: string[]
   /** Emerald Rogue: the run's Pokédex variant id; '' for the game's default. */
   runDex: string
+  /** Emerald Rogue: species on offer on the current route, for Capture next to rate. */
+  available: string[]
 }
 
 export const EMPTY_STATE: SavedState = {
@@ -54,6 +56,7 @@ export const EMPTY_STATE: SavedState = {
   overworld: [],
   daycare: [],
   runDex: '',
+  available: [],
 }
 
 export interface StoredShape {
@@ -66,6 +69,7 @@ export interface StoredShape {
   w?: unknown
   dc?: unknown
   rd?: unknown
+  av?: unknown
 }
 
 function num(value: unknown, fallback: number): number {
@@ -196,6 +200,7 @@ export function parseState(raw: unknown, data: GameData, lookup: Lookup): SavedS
     overworld,
     daycare: names(parsed.dc).filter((n) => overworld.includes(n)).slice(0, DAYCARE_SLOTS),
     runDex: str(parsed.rd),
+    available: names(parsed.av),
   }
 }
 
@@ -211,6 +216,7 @@ export function serialiseState(state: SavedState): StoredShape {
     ...(state.overworld.length ? { w: state.overworld } : {}),
     ...(state.daycare.length ? { dc: state.daycare } : {}),
     ...(state.runDex ? { rd: state.runDex } : {}),
+    ...(state.available.length ? { av: state.available } : {}),
   }
 }
 

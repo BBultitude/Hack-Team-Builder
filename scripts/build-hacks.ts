@@ -3,8 +3,8 @@
  *
  * Reads each hack's own community sources (the ones romhackdex.net credits),
  * pinned to a commit, and writes only what differs from the vanilla data in
- * data/: changed species, forms the vanilla dex lacks, extra level-up moves,
- * and boss teams. Everything is keyed by name, so a pack survives a
+ * data/: changed species, forms the vanilla dex lacks, complete move sets
+ * (Unbound), and boss teams. Everything is keyed by name, so a pack survives a
  * regeneration of the vanilla data. Run `npm run build:data` first.
  *
  * Usage: npm run build:hacks
@@ -13,6 +13,7 @@ import { mkdir, readFile, writeFile, access } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { DexEntry, HackPack, Move, Nature, TrainerMon, TypeChart } from '../src/types'
+import { CATCH_MOVES } from '../src/logic/catching'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..')
@@ -278,23 +279,88 @@ function trainers(
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
-/** LEVEL_UP_MOVE entries per species, as move names this app knows that vanilla doesn't already teach. */
-function extraLevelUp(ctx: Context, text: string, learnsets: number[][], moves: Move[]): Record<string, string[]> {
+/** File names under `dir` in a pinned repo, from GitHub's tree API, cached like the sources. */
+async function listDir(src: { repo: string; sha: string }, dir: string): Promise<string[]> {
+  const cached = join(CACHE, src.sha.slice(0, 12), 'tree.json')
+  if (!(await exists(cached))) {
+    process.stdout.write(`  listing ${src.repo} ... `)
+    const res = await fetch(`https://api.github.com/repos/${src.repo}/git/trees/${src.sha}?recursive=1`)
+    if (!res.ok) throw new Error(`${src.repo} tree: HTTP ${res.status}`)
+    await mkdir(dirname(cached), { recursive: true })
+    await writeFile(cached, await res.text())
+    process.stdout.write('done\n')
+  }
+  const tree = JSON.parse(await readFile(cached, 'utf8')) as { tree: { path: string; type: string }[] }
+  return tree.tree.filter((t) => t.type === 'blob' && dirname(t.path) === dir).map((t) => t.path)
+}
+
+/** Old move spellings the sources still use. */
+const MOVE_RENAMES: Record<string, string> = { vicegrip: 'visegrip' }
+
+const moveKey = (raw: string): string => {
+  const plain = key(raw.replace(/^MOVE_/, ''))
+  return MOVE_RENAMES[plain] ?? plain
+}
+
+/** A damaging move this app knows, by any spelling; status moves aren't in moves.json and drop quietly. */
+function damagingMove(ctx: Context, raw: string): string | undefined {
+  const k = moveKey(raw)
+  const found = ctx.moveByKey.get(k)?.n
+  if (!found && !ctx.allMoves.has(k)) ctx.unmatched.add(`move ${raw}`)
+  return found
+}
+
+export interface LearnSources {
+  /** src/Learnsets.c */
+  levelUp: string
+  /** One src/tm_compatibility or src/tutor_compatibility file each: "TM26: Earthquake", then a species constant per line. */
+  compat: string[]
+  /** src/Egg_Moves.c */
+  egg: string
+}
+
+/**
+ * Every move each species can learn in the hack (level-up, TM, tutor, egg),
+ * by dex name, from Dynamic Pokémon Expansion sources. `species` maps a
+ * SPECIES_ constant to a dex name, or undefined for forms the app lacks.
+ * `keep` names status moves to keep anyway (the catch helpers: Spore,
+ * Thunder Wave), which the app's move data otherwise lacks.
+ */
+export function hackLearnsets(
+  ctx: Context,
+  src: LearnSources,
+  species: (constant: string) => string | undefined,
+  keep: readonly string[] = [],
+): Record<string, string[]> {
+  const kept = new Map(keep.map((n) => [key(n), n]))
+  const moveName = (raw: string): string | undefined => kept.get(moveKey(raw)) ?? damagingMove(ctx, raw)
+  const out = new Map<string, Set<string>>()
+  const add = (constant: string, move: string | undefined): void => {
+    const name = species(constant.startsWith('SPECIES_') ? constant : `SPECIES_${constant}`)
+    if (!name || !move) return
+    if (!out.has(name)) out.set(name, new Set())
+    out.get(name)!.add(move)
+  }
+
   const lists = new Map<string, string[]>()
-  for (const m of text.matchAll(/(s\w+LevelUpLearnset)\[\]\s*=\s*\{([\s\S]*?)\};/g)) {
+  for (const m of src.levelUp.matchAll(/(s\w+LevelUpLearnset)\[\]\s*=\s*\{([\s\S]*?)\};/g)) {
     lists.set(m[1]!, [...m[2]!.matchAll(/LEVEL_UP_MOVE\(\s*\d+\s*,\s*(MOVE_[A-Z0-9_]+)\)/g)].map((x) => x[1]!))
   }
-  const out: Record<string, string[]> = {}
-  for (const m of text.matchAll(/\[(SPECIES_[A-Z0-9_]+)\]\s*=\s*(s\w+LevelUpLearnset)/g)) {
-    const i = ctx.dexByKey.get(speciesKey(m[1]!))
-    if (i === undefined) continue
-    const known = new Set((learnsets[i] ?? []).map((j) => moves[j]?.n))
-    const extra = (lists.get(m[2]!) ?? [])
-      .map((c) => ctx.moveByKey.get(key(c.replace(/^MOVE_/, '')))?.n)
-      .filter((n): n is string => !!n && !known.has(n))
-    if (extra.length) out[ctx.dex[i]!.n] = [...new Set(extra)]
+  for (const m of src.levelUp.matchAll(/\[(SPECIES_[A-Z0-9_]+)\]\s*=\s*(s\w+LevelUpLearnset)/g)) {
+    for (const c of lists.get(m[2]!) ?? []) add(m[1]!, moveName(c))
   }
-  return out
+
+  for (const text of src.compat) {
+    const [head, ...rows] = text.split(/\r?\n/)
+    const move = moveName((head ?? '').replace(/^[^:]*:\s*/, '').trim())
+    for (const row of rows) if (row.trim()) add(row.trim(), move)
+  }
+
+  for (const m of src.egg.matchAll(/egg_moves\(\s*(\w+)\s*,([\s\S]*?)\)/g)) {
+    for (const c of m[2]!.match(/MOVE_[A-Z0-9_]+/g) ?? []) add(m[1]!, moveName(c))
+  }
+
+  return Object.fromEntries([...out].map(([n, moves]) => [n, [...moves]]))
 }
 
 function check(name: string, ctx: Context, speciesCount: number): void {
@@ -343,11 +409,10 @@ export function rogueLegendaries(ctx: Context, text: string): string[] {
 }
 
 async function main(): Promise<void> {
-  const [chart, dex, moves, learnsets, natures] = await Promise.all([
+  const [chart, dex, moves, natures] = await Promise.all([
     readJson<TypeChart>('typechart.json'),
     readJson<DexEntry[]>('dex.json'),
     readJson<Move[]>('moves.json'),
-    readJson<number[][]>('learnsets.json'),
     readJson<Nature[]>('natures.json'),
   ])
   // English names from the PokeAPI CSVs build-data cached; status moves aren't in moves.json.
@@ -383,7 +448,6 @@ async function main(): Promise<void> {
     }
     const forms = new Map<string, Species>()
     const count = diffSpecies(ctx, speciesBlocks(await source(UNBOUND, 'src/Base_Stats.c')), pack, forms)
-    pack.learn = extraLevelUp(ctx, await source(UNBOUND, 'src/Learnsets.c'), learnsets, moves)
 
     const orderText = await source(UNBOUND_CALC, 'js/data/team-order.js')
     const order = JSON.parse(orderText.slice(orderText.indexOf('{'), orderText.lastIndexOf('}') + 1)) as Record<string, string[]>
@@ -418,6 +482,34 @@ async function main(): Promise<void> {
       if (!name) ctx.unmatched.add(`obtain ${row.name}`)
       else if (row.location?.trim()) pack.obtain[name] = row.location.trim()
     }
+
+    // Every move Unbound teaches, replacing vanilla's. After the trainers, so forms they added get theirs too.
+    const compat: string[] = []
+    for (const dir of ['src/tm_compatibility', 'src/tutor_compatibility']) {
+      for (const path of await listDir(UNBOUND, dir)) compat.push(await source(UNBOUND, path))
+    }
+    let formsMissed = 0
+    const formByKey = new Map(Object.keys(pack.dex).filter((n) => pack.dex[n]!.base).map((n) => [key(n), n]))
+    const learn = hackLearnsets(
+      ctx,
+      { levelUp: await source(UNBOUND, 'src/Learnsets.c'), compat, egg: await source(UNBOUND, 'src/Egg_Moves.c') },
+      (constant) => {
+        const k = speciesKey(constant)
+        const i = ctx.dexByKey.get(k)
+        if (i !== undefined) return ctx.dex[i]!.n
+        const form = formByKey.get(k)
+        // Arceus types, Minior colours and the like: forms this app has no entry for, so nothing to attach moves to.
+        if (!form) formsMissed++
+        return form
+      },
+      CATCH_MOVES,
+    )
+    // Who can learn each catch helper (Spore, Thunder Wave...), so catch plans follow Unbound too.
+    pack.catchMoves = Object.fromEntries(CATCH_MOVES.map((m) => [m, Object.keys(learn).filter((n) => learn[n]!.includes(m))]))
+    // The status helpers aren't in the move data, so they stay out of the move sets themselves.
+    const status = new Set(CATCH_MOVES.filter((m) => !ctx.moveByKey.has(key(m))))
+    pack.learn = Object.fromEntries(Object.entries(learn).map(([n, moves]) => [n, moves.filter((m) => !status.has(m))]))
+    console.log(`  unbound: move sets for ${Object.keys(pack.learn).length} species (${formsMissed} rows for forms the app lacks)`)
 
     pack.unmatched = [...ctx.unmatched]
     check('unbound', ctx, count)

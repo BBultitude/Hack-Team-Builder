@@ -84,6 +84,9 @@ export function Suggest({ value, placeholder, options, onPick, onInput, clearOnP
 
   useEffect(() => cancelPendingClose, [])
 
+  // Follow the owner's value when it changes from outside (a new opponent clears its ability), not only at first render.
+  useEffect(() => setQuery(value), [value])
+
   const matches = open ? filterOptions(options, query) : []
   const listShown = matches.length > 0
 
@@ -103,7 +106,11 @@ export function Suggest({ value, placeholder, options, onPick, onInput, clearOnP
     const el = wrapRef.current
     if (!el) return
     const correction = scrollCorrection(el.getBoundingClientRect().bottom, visibleBottom())
-    if (correction > 0) window.scrollBy({ top: correction })
+    if (correction <= 0) return
+    // Inside a modal, scroll the modal: scrolling the window only moves the page behind it.
+    const dialog = el.closest('dialog')
+    if (dialog) dialog.scrollBy({ top: correction })
+    else window.scrollBy({ top: correction })
   }
 
   useLayoutEffect(() => {
@@ -134,6 +141,7 @@ export function Suggest({ value, placeholder, options, onPick, onInput, clearOnP
         value={query}
         placeholder={placeholder}
         autocomplete="off"
+        enterkeyhint="done"
         autocapitalize="off"
         spellcheck={false}
         onFocus={() => {

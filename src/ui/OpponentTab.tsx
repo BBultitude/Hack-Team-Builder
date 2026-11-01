@@ -166,39 +166,44 @@ export function OpponentTab(props: Props) {
                 </div>
               </div>
             </div>
-            <label class="field">
-              <span>Its level (optional)</span>
-              <NumberField
-                optional
-                min={1}
-                max={100}
-                placeholder="Same as your team's"
-                value={opponent?.lv}
-                onChange={(lv) => patchOpponent({ lv })}
-              />
-            </label>
-            <details class="field" open={movesKnown}>
-              <summary>Its moves (if known)</summary>
-              <div class="stat-grid">
-                {[0, 1, 2, 3].map((slot) => {
-                  const set = (v: string): void => {
-                    const next = [0, 1, 2, 3].map((i) => opponentMoves[i] ?? '')
-                    next[slot] = v
-                    patchOpponent({ mv: next })
-                  }
-                  return (
-                    <Suggest
-                      key={slot}
-                      value={opponentMoves[slot] ?? ''}
-                      placeholder={`Move ${slot + 1}`}
-                      options={allMoves}
-                      onInput={set}
-                      onPick={set}
-                    />
-                  )
-                })}
-              </div>
-            </details>
+            {/* Rogue: wild levels track yours and moves are never shown, so these only add noise there. */}
+            {!props.partyOnly && (
+              <>
+                <label class="field">
+                  <span>Its level (optional)</span>
+                  <NumberField
+                    optional
+                    min={1}
+                    max={100}
+                    placeholder="Same as your team's"
+                    value={opponent?.lv}
+                    onChange={(lv) => patchOpponent({ lv })}
+                  />
+                </label>
+                <details class="field" open={movesKnown}>
+                  <summary>Its moves (if known)</summary>
+                  <div class="stat-grid">
+                    {[0, 1, 2, 3].map((slot) => {
+                      const set = (v: string): void => {
+                        const next = [0, 1, 2, 3].map((i) => opponentMoves[i] ?? '')
+                        next[slot] = v
+                        patchOpponent({ mv: next })
+                      }
+                      return (
+                        <Suggest
+                          key={slot}
+                          value={opponentMoves[slot] ?? ''}
+                          placeholder={`Move ${slot + 1}`}
+                          options={allMoves}
+                          onInput={set}
+                          onPick={set}
+                        />
+                      )
+                    })}
+                  </div>
+                </details>
+              </>
+            )}
             <label class="field">
               <span>Ability (optional)</span>
               <Suggest
@@ -218,11 +223,14 @@ export function OpponentTab(props: Props) {
           </>
         )}
 
-        <label class="field">
-          <span>Your team's level</span>
-          <NumberField min={1} max={100} value={props.level} onChange={(v) => v !== undefined && props.onLevel(v)} />
+        {/* Help text sits outside the label: a tap on it would focus the box and open the keyboard. */}
+        <div class="field">
+          <label class="field">
+            <span>Your team's level</span>
+            <NumberField min={1} max={100} value={props.level} onChange={(v) => v !== undefined && props.onLevel(v)} />
+          </label>
           <span class="muted">Every Pokémon you own is assumed to be at this level, so one a level or two behind still counts.</span>
-        </label>
+        </div>
 
         {!props.partyOnly && (
           <div class="row">
@@ -282,7 +290,10 @@ export function OpponentTab(props: Props) {
               <div class="card stack">
                 <h2 class="row" style="margin:0">
                   <Sprite gen={data.gen} id={spriteOf(out.slot)} />
-                  <span class="grow">Out: {out.name}</span>
+                  <span class="grow">
+                    Out: {out.name}
+                    {out === best && ', your best pick'}
+                  </span>
                   <span class="muted">
                     rank {outRank + 1} of {ranked.length}
                   </span>
@@ -304,7 +315,8 @@ export function OpponentTab(props: Props) {
               </div>
             )}
 
-            {best && (
+            {/* The Out card already covers it when the one out is the best or the worst. */}
+            {best && best !== out && (
               <div class="card stack">
                 <h2 class="row" style="margin:0">
                   <Sprite gen={data.gen} id={spriteOf(best.slot)} />
@@ -314,7 +326,7 @@ export function OpponentTab(props: Props) {
               </div>
             )}
 
-            {worst && (
+            {worst && worst !== out && (
               <div class="card stack">
                 <h2 class="row" style="margin:0">
                   <Sprite gen={data.gen} id={spriteOf(worst.slot)} />

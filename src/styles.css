@@ -279,8 +279,28 @@ main {
  * only while one is open so the page is not permanently padded by a
  * screenful of nothing.
  */
-body.suggest-open main {
+body.suggest-open main,
+body.suggest-open .pokemon-modal-body {
   padding-bottom: calc(60vh + env(safe-area-inset-bottom));
+}
+
+/* With a modal open, only the modal scrolls: the page behind stays put. html too, which older iOS Safari needs. */
+html:has(dialog[open]),
+body:has(dialog[open]) { overflow: hidden; }
+
+/*
+ * Typing on a touch screen: the keyboard can take half the screen, so the
+ * pinned header, party bar and tabs step aside and the box gets all of it.
+ * Nothing moves: the header's room stays padded and the party bar keeps its
+ * place in the flow. App sets the class while a text box has focus.
+ */
+@media (pointer: coarse) {
+  body.typing .shell-top { position: absolute; }
+  body.typing .party { position: static; }
+}
+/* Only the bottom bar hides: in the wide layout the tabs are part of the header's height. */
+@media (pointer: coarse) and (max-width: 899px) {
+  body.typing .tabs { display: none; }
 }
 
 /* Bottom of the shell: the tabs, within thumb reach. */
@@ -650,6 +670,7 @@ body.suggest-open main {
 
 /* A sheet over the screen: full width on a phone, 560px wide and centred above that. */
 .pokemon-modal {
+  overflow-y: auto;
   width: min(100vw, 560px);
   max-width: 100vw;
   max-height: calc(100dvh - 2rem);

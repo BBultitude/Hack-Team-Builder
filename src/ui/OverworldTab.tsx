@@ -4,10 +4,9 @@ import type { Lookup } from '../logic/lookup'
 import { entryFromDex } from '../logic/member'
 import { MAX_TEAM } from '../logic/team'
 import { DAYCARE_SLOTS } from '../logic/storage'
-import { dexNames, runVariant } from '../logic/setup'
+import { runVariant } from '../logic/setup'
 import { dexList } from '../logic/checklist'
 import { Sprite } from './Sprite'
-import { Suggest } from './Suggest'
 import { Types } from './Types'
 
 interface Props {
@@ -89,7 +88,7 @@ export function OverworldTab(props: Props) {
         </div>
         <p class="muted" style="margin:0">
           Tick the Pokémon roaming your hub, and mark up to {DAYCARE_SLOTS} you keep in the Day Care. Start a run
-          by adding your starter to the party: one from here, or search for the random one you were given.
+          by finding your starter in the list below (filter by name) and tapping + Party.
         </p>
         {pack?.variants?.length ? (
           <label class="field">
@@ -104,10 +103,6 @@ export function OverworldTab(props: Props) {
             <span class="muted">Capture next only suggests what this Pokédex lets appear in a run.</span>
           </label>
         ) : null}
-        <label class="field">
-          <span>Add to party</span>
-          <Suggest value="" placeholder="Search any Pokémon" options={dexNames(data)} onPick={props.onJoin} clearOnPick />
-        </label>
         <div class="row wrap">
           {confirmNewRun ? (
             <>

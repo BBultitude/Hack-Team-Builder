@@ -58,6 +58,7 @@ const sample: SavedState = {
   overworld: [],
   daycare: [],
   runDex: '',
+  available: [],
 }
 
 describe('setup hack fields', () => {
@@ -79,8 +80,8 @@ describe('levels and opponent details', () => {
   })
 
   it('round-trips Emerald Rogue run state, keeping the Day Care to overworld Pokémon and three slots', () => {
-    const run = { ...sample, overworld: ['Zubat', 'Eevee', 'Ralts', 'Abra'], daycare: ['Zubat', 'Eevee', 'Ralts'], runDex: 'kanto_rby' }
-    expect(round(run)).toMatchObject({ overworld: run.overworld, daycare: run.daycare, runDex: 'kanto_rby' })
+    const run = { ...sample, overworld: ['Zubat', 'Eevee', 'Ralts', 'Abra'], daycare: ['Zubat', 'Eevee', 'Ralts'], runDex: 'kanto_rby', available: ['Mareep', 'Rattata'] }
+    expect(round(run)).toMatchObject({ overworld: run.overworld, daycare: run.daycare, runDex: 'kanto_rby', available: run.available })
     localStorage.setItem(KEY, JSON.stringify({ v: 1, w: ['Zubat', 'Zubat', 'Eevee'], dc: ['Mew', 'Zubat', 'Eevee', 'Zubat'] }))
     expect(load(data, lookup, ID)).toMatchObject({ overworld: ['Zubat', 'Eevee'], daycare: ['Zubat', 'Eevee'] })
   })

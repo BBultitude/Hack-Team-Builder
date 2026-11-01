@@ -163,8 +163,10 @@ export interface HackPack {
   regional?: string[]
   /** How to get each obtainable species, by dex name; absent means it can't be got in this hack. */
   obtain?: Record<string, string>
-  /** Level-up moves the hack adds, by dex name. */
+  /** Every move each species can learn in the hack (level-up, TM, tutor, egg), by dex name; replaces vanilla's. */
   learn?: Record<string, string[]>
+  /** Catch-helper move -> dex names that can learn it in the hack; replaces vanilla's catch.json. */
+  catchMoves?: Record<string, string[]>
   /** Boss teams per difficulty. */
   trainers?: Record<string, Trainer[]>
   /** Emerald Rogue's run Pokédex choices: a species may appear when it or an earlier stage is listed and its generation is within `gen`. */

@@ -35,6 +35,7 @@ export function NumberField(props: Props) {
       inputMode="numeric"
       pattern="[0-9]*"
       autocomplete="off"
+      enterkeyhint="done"
       placeholder={props.placeholder}
       value={draft}
       onInput={(e) => {
@@ -44,6 +45,8 @@ export function NumberField(props: Props) {
         const n = parse(v)
         if (n !== null && n >= props.min && n <= props.max) props.onChange(n)
       }}
+      // Enter closes the keyboard, like the Done key it shows.
+      onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
       onBlur={() => {
         if (draft === '' && props.optional) return
         const n = parse(draft)

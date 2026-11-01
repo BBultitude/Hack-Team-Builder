@@ -70,6 +70,7 @@ export function App() {
   const [overworld, setOverworld] = useState(EMPTY_STATE.overworld)
   const [daycare, setDaycare] = useState(EMPTY_STATE.daycare)
   const [runDex, setRunDex] = useState(EMPTY_STATE.runDex)
+  const [available, setAvailable] = useState(EMPTY_STATE.available)
   /** Emerald Rogue: a Pokémon waiting for a full party to make room. */
   const [incoming, setIncoming] = useState<string | null>(null)
   const [restored, setRestored] = useState(false)
@@ -163,6 +164,7 @@ export function App() {
     setOverworld(saved.overworld)
     setDaycare(saved.daycare)
     setRunDex(saved.runDex)
+    setAvailable(saved.available)
     setIncoming(null)
     setOpenIndex(null)
     setOutIndex(null)
@@ -173,13 +175,13 @@ export function App() {
     // Only persist once the saved state has been restored, so the first
     // render never writes an empty roster over a real one.
     if (!restored) return
-    const state = { roster, team, opponent, scope, level, overworld, daycare, runDex }
+    const state = { roster, team, opponent, scope, level, overworld, daycare, runDex, available }
     const json = JSON.stringify(serialiseState(state))
     if (json === lastSaved.current) return
     lastSaved.current = json
     save(active.id, state)
     patchActive({})
-  }, [restored, roster, team, opponent, scope, level, overworld, daycare, runDex])
+  }, [restored, roster, team, opponent, scope, level, overworld, daycare, runDex, available])
 
   const stampOf = (index: SetupIndex): number => Math.max(...index.list.map((s) => s.updatedAt))
 
@@ -247,10 +249,16 @@ export function App() {
     window.addEventListener('focus', onFocus)
     document.addEventListener('visibilitychange', onFocus)
     document.addEventListener('focusout', onLeaveField)
+    // Typing mode (see styles.css): focusout runs with focus nowhere, focusin once it lands, so both just re-check.
+    const onTyping = (): void => void document.body.classList.toggle('typing', isEditing())
+    document.addEventListener('focusin', onTyping)
+    document.addEventListener('focusout', onTyping)
     window.addEventListener('storage', onStorage)
     return () => {
       window.removeEventListener('storage', onStorage)
       document.removeEventListener('focusout', onLeaveField)
+      document.removeEventListener('focusin', onTyping)
+      document.removeEventListener('focusout', onTyping)
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', onFocus)
     }
@@ -473,6 +481,7 @@ export function App() {
                   setOpponent(null)
                   setOutIndex(null)
                   setIncoming(null)
+                  setAvailable([])
                 }}
               />
             )}
@@ -506,6 +515,8 @@ export function App() {
                 roster={roster}
                 team={party}
                 allow={allow}
+                available={available}
+                onAvailable={setAvailable}
                 onCaught={(name, replaces) => {
                   if (partyOnly) return join(name, replaces)
                   const next = addToRoster(data, lookup, roster, team, name)

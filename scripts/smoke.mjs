@@ -93,6 +93,8 @@ await step('evolving moves the tick to the evolution', async () => {
   await waitCaught(9)
   await openMon('Eevee')
   await page.locator(`${modal} button:has-text("Evolve → Vaporeon")`).click()
+  // One tap only asks (easy to hit by accident on a small phone); this confirm only exists if it asked.
+  await page.locator(`${modal} button:text-is("Yes, evolve into Vaporeon")`).click({ timeout: 5000 })
   await page.waitForSelector(`${modal} h2:text-is("Vaporeon")`, { timeout: 5000 })
   await page.keyboard.press('Escape')
   if (await box('Eevee').isChecked()) throw new Error('Eevee still ticked')
@@ -221,8 +223,12 @@ await step('editing a move in the modal updates the member', async () => {
   await page.click('button[role="tab"]:has-text("Pokédex")')
   await openMon('Charizard')
   await page.locator(`${modal} summary:has-text("Hack changes")`).click()
+  if ((await page.evaluate(() => getComputedStyle(document.body).overflow)) !== 'hidden') throw new Error('page behind the modal can still scroll')
+  const behind = await page.evaluate(() => window.scrollY)
   const field = page.locator(`${modal} input[placeholder^="Move"]`).first()
   await field.fill('Earthquake')
+  await page.waitForTimeout(200)
+  if ((await page.evaluate(() => window.scrollY)) !== behind) throw new Error('opening a suggestion list scrolled the page behind the modal')
   await page.locator('.suggest-list button:text-is("Earthquake")').click()
   if ((await field.inputValue()) !== 'Earthquake') throw new Error('move not applied')
   await page.keyboard.press('Escape')
@@ -374,6 +380,20 @@ await step('an Unbound game offers boss teams and rates damage by level', async 
   const best = await page.locator('.card:has(h2:has-text("Best:"))').innerText()
   if (!/Takes \d/.test(best)) throw new Error(`no damage numbers: ${best.slice(0, 160)}`)
   console.log('        ' + best.replace(/\n+/g, ' | ').slice(0, 220))
+
+  // Only Pikachu is owned, so the one out is also the best: one card, not two.
+  await page.locator('label:has-text("Currently out") select').selectOption({ label: 'Pikachu' })
+  await page.waitForSelector('h2:has-text("your best pick")', { timeout: 5000 })
+  if (await page.locator('h2:has-text("Best:")').count()) throw new Error('Best card repeats the Out card')
+  await page.locator('label:has-text("Currently out") select').selectOption('')
+
+  // A boss came with an ability; a new opponent from the dex must not keep it.
+  const ability = page.locator('label:has-text("Ability (optional)") input')
+  if (!(await ability.inputValue())) throw new Error('the boss pick filled no ability')
+  // With boss teams the box reads "Or search the dex".
+  await page.fill('input[placeholder*="earch the dex"]', 'Gengar')
+  await page.locator('.suggest-list button:text-is("Gengar")').click()
+  if ((await ability.inputValue()) !== '') throw new Error(`ability kept after changing opponent: ${await ability.inputValue()}`)
 })
 
 await step('sync waits while a box has focus and runs on leaving it', async () => {
@@ -408,9 +428,11 @@ await step('an Emerald Rogue game tracks the overworld, Day Care and a six-Poké
   await page.click('button:has-text("Day Care 1/3")')
   if ((await page.locator('.dex-row').count()) !== 1) throw new Error('Day Care filter should show only Zubat')
 
+  // No separate search box: filter the list and tap + Party.
+  await page.click('[role="group"][aria-label="Show"] button:text-is("All")')
   const join = async (name) => {
-    await page.fill('input[placeholder="Search any Pokémon"]', name)
-    await page.locator(`.suggest-list button:text-is("${name}")`).click({ timeout: 5000 })
+    await page.fill('input[aria-label="Filter the Pokédex by name"]', name)
+    await page.locator(`button[aria-label="Add ${name} to the party"]`).click({ timeout: 5000 })
   }
   for (const n of ['Bulbasaur', 'Charmander', 'Squirtle', 'Pikachu', 'Eevee', 'Abra']) await join(n)
   await join('Mareep')
@@ -427,12 +449,31 @@ await step('an Emerald Rogue game tracks the overworld, Day Care and a six-Poké
   await page.waitForSelector('h2:text-is("Capture next")', { timeout: 5000 })
   if (!(await page.locator('.card p:has-text("Replaces")').count())) throw new Error('Capture next does not say who to replace')
 
+  // What this route actually offers, each rated against the party.
+  const offer = 'input[placeholder="Add a Pokémon you can see"]'
+  for (const n of ['Gyarados', 'Rattata']) {
+    await page.fill(offer, n)
+    await page.locator(`.suggest-list button:text-is("${n}")`).click()
+  }
+  const card = page.locator('.card:has(h2:text-is("Available here"))')
+  const verdicts = await card.locator('.row.wrap').allInnerTexts()
+  if (verdicts.length !== 2 || !verdicts.every((v) => /Catch|Skip/.test(v))) throw new Error(`verdicts: ${verdicts.join(' / ')}`)
+  console.log('        ' + verdicts.map((v) => v.replace(/\n+/g, ' ')).join(' / '))
+  await card.locator('button:text-is("Clear")').click()
+  if (await card.locator('.row.wrap').count()) throw new Error('Clear left verdicts behind')
+  // Catching one takes it off the list (and into the party).
+  await page.fill(offer, 'Gyarados')
+  await page.locator('.suggest-list button:text-is("Gyarados")').click()
+  await card.locator('button:text-is("I caught Gyarados")').click()
+  if (await card.locator('.row.wrap').count()) throw new Error('a caught Pokémon stayed in Available here')
+  if (!(await page.locator('.party-slot[title="Gyarados"]').count())) throw new Error('Gyarados did not join the party')
+
   await page.click('button[role="tab"]:has-text("Opponent")')
   if (await page.locator('button:text-is("Everything I own")').count()) throw new Error('Everything I own shown in Rogue')
   await page.fill('input[placeholder*="Search the dex"]', 'Gengar')
   await page.locator('.suggest-list button:text-is("Gengar")').click()
-  if (await page.locator('details:has(summary:has-text("Its moves")) ').evaluate((d) => d.open)) {
-    throw new Error('unknown opponent moves should start collapsed')
+  if (await page.locator('summary:has-text("Its moves"), label:has-text("Its level")').count()) {
+    throw new Error('Rogue shows the opponent level and moves fields')
   }
 })
 
@@ -558,6 +599,29 @@ await step('the app fills the whole window on tablets and phones, either way rou
     if (got.over > 0) throw new Error(`${at}: page scrolls ${got.over}px sideways`)
     if (width === 800) await page.screenshot({ path: process.env.SHOT_TALL ?? '/tmp/smoke-portrait.png' })
   }
+})
+
+await step('typing on a touch phone moves the header, party bar and tabs out of the way', async () => {
+  const touch = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  const phone = await touch.newPage()
+  await phone.goto(url, { waitUntil: 'networkidle' })
+  await phone.waitForSelector('.dex-row', { timeout: 10000 })
+  await phone.click('button[role="tab"]:has-text("Opponent")')
+  const box = phone.locator('input[placeholder*="Search the dex"]')
+  await box.focus()
+  const typing = await phone.evaluate(() => ({
+    on: document.body.classList.contains('typing'),
+    tabs: getComputedStyle(document.querySelector('.tabs')).display,
+    head: getComputedStyle(document.querySelector('.shell-top')).position,
+  }))
+  if (!typing.on || typing.tabs !== 'none' || typing.head !== 'absolute') throw new Error(`while typing: ${JSON.stringify(typing)}`)
+  await box.blur()
+  const after = await phone.evaluate(() => ({
+    on: document.body.classList.contains('typing'),
+    tabs: getComputedStyle(document.querySelector('.tabs')).display,
+  }))
+  if (after.on || after.tabs === 'none') throw new Error(`after typing: ${JSON.stringify(after)}`)
+  await touch.close()
 })
 
 await step('no console errors or failed requests', async () => {

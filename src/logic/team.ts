@@ -307,6 +307,79 @@ export interface LookForTarget {
   hits: number[]
 }
 
+/** The team to measure a catch against (the chosen one, or the roster's auto-built best six) and the families already owned. */
+function baseline(data: GameData, lookup: Lookup, roster: readonly RosterEntry[], team: readonly number[]) {
+  const baseIdx = team.length ? team : autoBuild(data, lookup, roster)
+  const base = baseIdx
+    .map((i) => roster[i])
+    .filter((e): e is RosterEntry => e !== undefined)
+    .map((e) => resolveMember(data, lookup, e))
+  const owned = new Set(roster.map((e) => data.dex[e.d]?.fm).filter((f) => f !== undefined))
+  return { baseIdx, base, baseAnalysis: analyseTeam(data, base), owned }
+}
+
+/**
+ * The team with `m` added, or put in whichever slot helps most when full.
+ * `slot` is the replaced team position, -1 when it was simply added.
+ */
+function bestSwap(data: GameData, base: readonly Member[], m: Member): { analysis: TeamAnalysis; slot: number } | null {
+  if (base.length < MAX_TEAM) return { analysis: analyseTeam(data, [...base, m]), slot: -1 }
+  let best: { analysis: TeamAnalysis; slot: number } | null = null
+  for (let s = 0; s < base.length; s++) {
+    const analysis = analyseTeam(data, base.map((b, j) => (j === s ? m : b)))
+    if (!best || analysis.score > best.analysis.score) best = { analysis, slot: s }
+  }
+  return best
+}
+
+export interface CatchRating {
+  /** Dex index of the species seen. */
+  index: number
+  /** Dex index it is rated as: itself or a later evolution, whichever helps most. */
+  target: number
+  /** Team score change; 0 or less means not worth catching. */
+  gain: number
+  /** Roster index it would take the place of, when the team is full. */
+  replaces?: number
+  /** Its family is already on the team or in the party. */
+  owned: boolean
+}
+
+/**
+ * Rates the species actually on offer (an Emerald Rogue route) against the
+ * current team: each as itself or its best later evolution, with who it would
+ * replace. Unknown names are skipped.
+ */
+export function rateCatches(
+  data: GameData,
+  lookup: Lookup,
+  roster: readonly RosterEntry[],
+  team: readonly number[],
+  names: readonly string[],
+): CatchRating[] {
+  const { baseIdx, base, baseAnalysis, owned } = baseline(data, lookup, roster, team)
+  const later = (i: number): number[] => [i, ...(data.dex[i]?.ev ?? []).flatMap(later)]
+  const out: CatchRating[] = []
+  for (const name of names) {
+    const index = lookup.dexByName.get(name.trim().toLowerCase())
+    const d = index === undefined ? undefined : data.dex[index]
+    if (index === undefined || !d) continue
+    if (owned.has(d.fm)) {
+      out.push({ index, target: index, gain: 0, owned: true })
+      continue
+    }
+    let best: CatchRating = { index, target: index, gain: -Infinity, owned: false }
+    // Base 1 Hit Points (Shedinja) makes the type score meaningless, as in lookFor.
+    for (const stage of later(index).filter((i) => (data.dex[i]?.s[0] ?? 0) > 1)) {
+      const swap = bestSwap(data, base, resolveMember(data, lookup, entryFromDex(data, data.dex[stage]!.n, stage)))
+      const gain = swap ? swap.analysis.score - baseAnalysis.score : -Infinity
+      if (swap && gain > best.gain) best = { index, target: stage, gain, owned: false, ...(swap.slot >= 0 ? { replaces: baseIdx[swap.slot]! } : {}) }
+    }
+    out.push(best.gain === -Infinity ? { ...best, gain: 0 } : best)
+  }
+  return out
+}
+
 /**
  * Realistically catchable species, from families not already owned, ranked
  * by how much they would improve the team (the current one, or the roster's
@@ -321,13 +394,7 @@ export function lookFor(
   /** A run's rules (Emerald Rogue): only species they allow, every one ball-catchable. */
   allow?: (dexIndex: number) => boolean,
 ): LookForTarget[] {
-  const baseIdx = team.length ? team : autoBuild(data, lookup, roster)
-  const base = baseIdx
-    .map((i) => roster[i])
-    .filter((e): e is RosterEntry => e !== undefined)
-    .map((e) => resolveMember(data, lookup, e))
-  const baseAnalysis = analyseTeam(data, base)
-  const owned = new Set(roster.map((e) => data.dex[e.d]?.fm).filter((f) => f !== undefined))
+  const { baseIdx, base, baseAnalysis, owned } = baseline(data, lookup, roster, team)
   const bst = (i: number): number => (data.dex[i]?.s ?? []).reduce((a, b) => a + b, 0)
 
   const families = new Map<number, number[]>()
@@ -339,15 +406,9 @@ export function lookFor(
     if (owned.has(d.fm) || d.s[0] === 1) return
     const source = catchSource(data, i, families.get(d.fm) ?? [i], allow)
     if (!source) return
-    const m = resolveMember(data, lookup, entryFromDex(data, d.n, i))
-    const trials = base.length < MAX_TEAM ? [[...base, m]] : base.map((_, s) => base.map((b, j) => (j === s ? m : b)))
-    let best: TeamAnalysis | null = null
-    let slot = -1
-    for (let s = 0; s < trials.length; s++) {
-      const a = analyseTeam(data, trials[s]!)
-      if (!best || a.score > best.score) [best, slot] = [a, s]
-    }
-    if (!best) return
+    const swap = bestSwap(data, base, resolveMember(data, lookup, entryFromDex(data, d.n, i)))
+    if (!swap) return
+    const { analysis: best, slot } = swap
     const gain = best.score - baseAnalysis.score
     if (gain <= 0) return
     out.push({
@@ -356,7 +417,7 @@ export function lookFor(
       ...(source.where ? { where: source.where } : {}),
       gift: source.gift,
       gain,
-      ...(trials.length > 1 ? { replaces: baseIdx[slot]! } : {}),
+      ...(slot >= 0 ? { replaces: baseIdx[slot]! } : {}),
       resists: baseAnalysis.exposed.filter((t) => !best.exposed.includes(t)),
       hits: baseAnalysis.uncovered.filter((t) => best.covered.includes(t)),
     })

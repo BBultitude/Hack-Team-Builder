@@ -158,6 +158,27 @@ describe('withHack (Unbound pack)', () => {
     expect(data.learnsets[dexIndex('Beedrill')]).not.toContain(needleArm)
   })
 
+  it("uses exactly the hack's move sets, replacing vanilla's", () => {
+    const beedrill = ub.dexByName.get('beedrill')!
+    const names = (moves: number[]) => moves.map((m) => unbound.moves[m]!.n)
+    expect(names(unbound.learnsets[beedrill]!).sort()).toEqual(
+      pack.learn!.Beedrill!.filter((n) => ub.moveByName.has(n.toLowerCase())).sort(),
+    )
+    // Some vanilla move Unbound doesn't teach Beedrill is gone.
+    expect(names(data.learnsets[dexIndex('Beedrill')]!).some((n) => !pack.learn!.Beedrill!.includes(n))).toBe(true)
+    // A form only the hack has gets its own moves rather than its base's.
+    expect(pack.learn!['Garchomp (Mega)']).toBeDefined()
+    expect(unbound.learnGens[beedrill]).toHaveLength(unbound.learnsets[beedrill]!.length)
+  })
+
+  it("uses the hack's own learners for the catch helpers", () => {
+    const names = (list: number[]) => list.map((i) => unbound.dex[i]!.n).sort()
+    expect(names(unbound.catchMoves['Thunder Wave']!)).toEqual([...pack.catchMoves!['Thunder Wave']!].sort())
+    expect(unbound.catchGens['Thunder Wave']).toHaveLength(unbound.catchMoves['Thunder Wave']!.length)
+    // Not just vanilla's list under another name.
+    expect(names(unbound.catchMoves['Thunder Wave']!)).not.toEqual(names(data.catchMoves['Thunder Wave']!))
+  })
+
   it('beats the generation history for changed types', () => {
     const changed = Object.entries(pack.dex).find(([, c]) => c.t && !c.base)
     if (!changed) return

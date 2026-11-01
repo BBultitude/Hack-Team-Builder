@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { expandMacros, firstBranches, key, parseSets, rogueLegendaries, rogueVariants } from './build-hacks'
+import { expandMacros, firstBranches, hackLearnsets, key, parseSets, rogueLegendaries, rogueVariants } from './build-hacks'
 
 describe('build-hacks parsers', () => {
   it('keeps the first branch of each #if', () => {
@@ -36,6 +36,29 @@ describe('build-hacks parsers', () => {
     const c = ctx()
     expect(rogueVariants(c, text)).toEqual([{ id: 'kanto_rby', label: 'Kanto Red/Blue/Yellow', gen: 1, species: ['Zubat', 'Golbat'] }])
     expect([...(c as unknown as { unmatched: Set<string> }).unmatched]).toEqual(['SPECIES_NOPE'])
+  })
+
+  it('collects level-up, TM, tutor and egg moves per species', () => {
+    const moves = [{ n: 'Wing Attack' }, { n: 'Bite' }, { n: 'Vise Grip' }, { n: 'Air Cutter' }]
+    const c = {
+      ...ctx(),
+      moveByKey: new Map(moves.map((m) => [key(m.n), m])),
+      allMoves: new Set([...moves.map((m) => key(m.n)), key('Haze')]),
+    } as unknown as Parameters<typeof hackLearnsets>[0]
+    const species = (constant: string) => ({ SPECIES_ZUBAT: 'Zubat', SPECIES_GOLBAT: 'Golbat' })[constant]
+    const learn = hackLearnsets(
+      c,
+      {
+        levelUp: 'static const struct LevelUpMove sZubatLevelUpLearnset[] = {\n LEVEL_UP_MOVE( 5, MOVE_BITE),\n LEVEL_UP_MOVE(9, MOVE_HAZE),\n};\n[SPECIES_ZUBAT] = sZubatLevelUpLearnset,',
+        compat: ['TM40: Wing Attack\r\nZUBAT\r\nGOLBAT\r\nGOLBAT_MEGA\r\n', 'Tutor 3: Vice Grip\nZUBAT\n'],
+        egg: 'egg_moves(ZUBAT,\n\tMOVE_AIRCUTTER,\n\tMOVE_NOPE),',
+      },
+      species,
+    )
+    // Haze is a status move (not in the move data): dropped quietly. The old spelling Vice Grip maps to Vise Grip.
+    expect(learn.Zubat!.sort()).toEqual(['Air Cutter', 'Bite', 'Vise Grip', 'Wing Attack'])
+    expect(learn.Golbat).toEqual(['Wing Attack'])
+    expect([...(c as unknown as { unmatched: Set<string> }).unmatched]).toEqual(['move MOVE_NOPE'])
   })
 
   it("reads Rogue's legendary list", () => {

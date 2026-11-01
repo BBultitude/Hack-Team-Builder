@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { RosterEntry } from '../types'
 import { data, lookup, typeIndex, dexIndex } from './testData'
 import { evolutionPath, evolve, incomingMultiplier, resolveMember } from './member'
-import { analyseTeam, autoBuild, effectivePower, keptMoves, lookFor, recommendMoves, suggestAdditions, swapReasons, MAX_TEAM } from './team'
+import { analyseTeam, autoBuild, effectivePower, keptMoves, lookFor, rateCatches, recommendMoves, suggestAdditions, swapReasons, MAX_TEAM } from './team'
 
 const t = typeIndex
 
@@ -262,6 +262,36 @@ describe('look for', () => {
     expect(data.dex[dexIndex('Blastoise')]!.cf).toBe(dexIndex('Squirtle'))
     expect(evolutionPath(data, dexIndex('Squirtle'), dexIndex('Blastoise')).map((i) => data.dex[i]!.n))
       .toEqual(['Squirtle', 'Wartortle', 'Blastoise'])
+  })
+})
+
+describe('rate what is on offer', () => {
+  const six = ['Charizard', 'Gengar', 'Snorlax', 'Pikachu', 'Machamp', 'Alakazam'].map((n) => own(n))
+  const party = [0, 1, 2, 3, 4, 5]
+
+  it('says who a helpful catch replaces in a full party', () => {
+    const [r] = rateCatches(data, lookup, six, party, ['Swampert'])
+    expect(r!.gain).toBeGreaterThan(0)
+    expect(party).toContain(r!.replaces)
+  })
+
+  it('flags a family already in the party', () => {
+    const [r] = rateCatches(data, lookup, six, party, ['Charmander'])
+    expect(r).toMatchObject({ owned: true, gain: 0 })
+  })
+
+  it('rates a first stage as whichever of its stages helps most', () => {
+    // Scores are type-based, so pure Water Mudkip can beat Water/Ground Swampert: never worse than the last stage alone.
+    const [first] = rateCatches(data, lookup, six, party, ['Mudkip'])
+    const [last] = rateCatches(data, lookup, six, party, ['Swampert'])
+    expect(['Mudkip', 'Marshtomp', 'Swampert']).toContain(data.dex[first!.target]!.n)
+    expect(first!.gain).toBeGreaterThanOrEqual(last!.gain)
+  })
+
+  it('skips names it does not know and adds without replacing in a part-full party', () => {
+    const out = rateCatches(data, lookup, six.slice(0, 2), [0, 1], ['Nonsense', 'Mudkip'])
+    expect(out).toHaveLength(1)
+    expect(out[0]!.replaces).toBeUndefined()
   })
 })
 

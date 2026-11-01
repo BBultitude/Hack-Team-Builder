@@ -85,16 +85,26 @@ export function withHack(data: GameData, pack: HackPack | null): GameData {
     learnGens.push(data.learnGens[from] ?? '')
   }
 
+  // Includes the forms just added, so a hack-only form gets its own moves.
+  const after = new Map(dex.map((d, i) => [d.n, i]))
+
+  // The hack's own move sets replace vanilla's: recommendations never suggest a move it doesn't teach.
   for (const [name, moves] of Object.entries(pack.learn ?? {})) {
-    const i = byName.get(name)
+    const i = after.get(name)
     if (i === undefined) continue
-    const extra = moves.map((m) => moveByName.get(m)).filter((m): m is number => m !== undefined)
-    learnsets[i] = [...(learnsets[i] ?? []), ...extra]
+    learnsets[i] = moves.map((m) => moveByName.get(m)).filter((m): m is number => m !== undefined)
     // Learnable from the hack's start; forSetup still drops moves newer than the cap.
-    learnGens[i] = (learnGens[i] ?? '') + '1'.repeat(extra.length)
+    learnGens[i] = '1'.repeat(learnsets[i]!.length)
   }
 
-  const after = new Map(dex.map((d, i) => [d.n, i]))
+  // Same for who can learn the catch helpers: catch plans never suggest a move the hack doesn't teach.
+  const catchMoves = pack.catchMoves
+    ? Object.fromEntries(
+        Object.entries(pack.catchMoves).map(([m, names]) => [m, names.map((n) => after.get(n)).filter((i): i is number => i !== undefined)]),
+      )
+    : undefined
+  const catchGens = catchMoves ? Object.fromEntries(Object.entries(catchMoves).map(([m, l]) => [m, '1'.repeat(l.length)])) : undefined
+
   const obtain = pack.obtain
     ? Object.fromEntries(
         Object.entries(pack.obtain)
@@ -103,7 +113,7 @@ export function withHack(data: GameData, pack: HackPack | null): GameData {
       )
     : undefined
 
-  return { ...data, dex, learnsets, learnGens, ...(obtain ? { obtain } : {}) }
+  return { ...data, dex, learnsets, learnGens, ...(obtain ? { obtain } : {}), ...(catchMoves ? { catchMoves, catchGens } : {}) }
 }
 
 export function forSetup(data: GameData, gen: number): GameData {

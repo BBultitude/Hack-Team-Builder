@@ -1,7 +1,9 @@
 import { useMemo } from 'preact/hooks'
 import type { GameData, RosterEntry } from '../types'
 import type { Lookup } from '../logic/lookup'
-import { lookFor } from '../logic/team'
+import { lookFor, rateCatches } from '../logic/team'
+import { dexNames } from '../logic/setup'
+import { Suggest } from './Suggest'
 import { evolutionPath } from '../logic/member'
 import { catchPlan } from '../logic/catching'
 import { Types } from './Types'
@@ -16,6 +18,9 @@ interface Props {
   allow?: (dexIndex: number) => boolean
   /** Adds the caught Pokemon by name, in place of roster index `replaces` when the team is full. */
   onCaught: (name: string, replaces?: number) => void
+  /** Emerald Rogue: species on offer on this route, rated one by one. */
+  available?: string[]
+  onAvailable?: (names: string[]) => void
 }
 
 export function LookForTab(props: Props) {
@@ -25,6 +30,13 @@ export function LookForTab(props: Props) {
     () => (roster.length ? lookFor(data, lookup, roster, team, undefined, props.allow) : []),
     [data, lookup, roster, team, props.allow],
   )
+
+  const available = props.available ?? []
+  const ratings = useMemo(
+    () => (available.length ? rateCatches(data, lookup, roster, team, available) : []),
+    [data, lookup, roster, team, available],
+  )
+  const options = useMemo(() => dexNames(data), [data])
 
   const typeName = (i: number): string => data.chart.types[i] ?? '?'
   const name = (i: number): string => data.dex[i]?.n ?? '?'
@@ -52,6 +64,69 @@ export function LookForTab(props: Props) {
           </p>
         )}
       </div>
+
+      {props.onAvailable && (
+        <div class="card stack">
+          <div class="row">
+            <h2 class="grow" style="margin:0">Available here</h2>
+            <button onClick={() => props.onAvailable!([])} disabled={available.length === 0}>
+              Clear
+            </button>
+          </div>
+          <p class="muted" style="margin:0">
+            Add what you can catch on this route; each one is checked against your party. Clear it for the next route.
+          </p>
+          <Suggest
+            value=""
+            placeholder="Add a Pokémon you can see"
+            options={options}
+            clearOnPick
+            onPick={(n) => !available.includes(n) && props.onAvailable!([...available, n])}
+          />
+          {ratings.map((r) => {
+            const seen = name(r.index)
+            const swapOut = r.replaces === undefined ? undefined : roster[r.replaces]
+            return (
+              <div key={r.index} class="row wrap">
+                <Sprite gen={data.gen} id={data.dex[r.index]?.id} size={40} />
+                <span class="grow" style="min-width:0">
+                  <strong>{seen}</strong>{' '}
+                  {r.owned ? (
+                    <span class="muted">Skip: already in your party.</span>
+                  ) : r.gain > 0 ? (
+                    <span>
+                      <strong class="good">Catch</strong>
+                      {r.target !== r.index && ` (as ${name(r.target)})`}
+                      {swapOut ? `, replaces ${swapOut.n}` : ''}{' '}
+                      <span class="lcd good">+{r.gain.toFixed(1)}</span>
+                    </span>
+                  ) : (
+                    <span class="muted">Skip: doesn't beat your party.</span>
+                  )}
+                </span>
+                {!r.owned && r.gain > 0 && (
+                  <button
+                    onClick={() => {
+                      // Caught, so no longer on offer: it would only read "already in your party" from now on.
+                      props.onAvailable!(available.filter((n) => n !== seen))
+                      props.onCaught(seen, r.replaces)
+                    }}
+                  >
+                    I caught {seen}
+                  </button>
+                )}
+                <button
+                  class="link"
+                  aria-label={`Remove ${seen} from available`}
+                  onClick={() => props.onAvailable!(available.filter((n) => n !== seen))}
+                >
+                  ✕
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {targets.length === 0 ? (
         <p class="empty">Nothing catchable would improve this team on type matchups.</p>

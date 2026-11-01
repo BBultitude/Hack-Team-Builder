@@ -22,6 +22,7 @@ interface MoveRule {
 }
 
 /** Best first within each effect: accuracy and reliability, roughly. */
+/** Moves that make a catch easier, best first. Their learners per hack come from catchMoves. */
 const RULES: Record<string, MoveRule> = {
   'False Swipe': { effect: 'weaken', immuneTypes: ['Ghost'] },
   Spore: { effect: 'sleep', powder: true },
@@ -36,6 +37,9 @@ const RULES: Record<string, MoveRule> = {
   'Thunder Wave': { effect: 'paralysis', immuneTypes: ['Ground'] },
   'Stun Spore': { effect: 'paralysis', powder: true },
 }
+
+/** Names of the catch-helper moves, for the hack build to collect their learners. */
+export const CATCH_MOVES = Object.keys(RULES)
 
 /** Abilities that stop each status outright. */
 const BLOCKS: Record<Effect, string[]> = {

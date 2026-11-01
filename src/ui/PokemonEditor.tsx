@@ -28,6 +28,8 @@ export function PokemonEditor(props: Props) {
   const { data, lookup, entry, onChange } = props
   const vanilla = entry.d >= 0 ? data.dex[entry.d] : undefined
   const [confirmRemove, setConfirmRemove] = useState(false)
+  /** Dex index of the evolution waiting for its second tap: on a small screen the button is easy to hit by accident. */
+  const [confirmEvolve, setConfirmEvolve] = useState<number | null>(null)
 
   const patch = (fields: Partial<RosterEntry>): void => onChange({ ...entry, ...fields })
 
@@ -124,11 +126,26 @@ export function PokemonEditor(props: Props) {
               Evolved it? Tap to update — nature and moves carry over. Methods are vanilla; hacks
               often swap trade evolutions for items or levels.
             </span>
-            {vanilla.ev.map((target) => (
-              <button key={target} onClick={() => onChange(evolve(data, entry, target))}>
-                Evolve → {data.dex[target]?.n}
-              </button>
-            ))}
+            {confirmEvolve !== null ? (
+              <>
+                <button
+                  class="primary"
+                  onClick={() => {
+                    setConfirmEvolve(null)
+                    onChange(evolve(data, entry, confirmEvolve))
+                  }}
+                >
+                  Yes, evolve into {data.dex[confirmEvolve]?.n}
+                </button>
+                <button onClick={() => setConfirmEvolve(null)}>Cancel</button>
+              </>
+            ) : (
+              vanilla.ev.map((target) => (
+                <button key={target} onClick={() => setConfirmEvolve(target)}>
+                  Evolve → {data.dex[target]?.n}
+                </button>
+              ))
+            )}
           </div>
         )}
 
