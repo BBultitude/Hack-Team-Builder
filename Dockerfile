@@ -16,7 +16,8 @@ COPY scripts/fetch-sprites.mjs scripts/fetch-sprites.mjs
 RUN node scripts/fetch-sprites.mjs
 
 COPY . .
-RUN npm run build
+# Tests gate the image: a failing test stops the build rather than shipping.
+RUN npm test && npm run build
 
 FROM node:22-alpine
 ENV NODE_ENV=production PORT=3000 DIST_DIR=/app/dist DATA_DIR=/data

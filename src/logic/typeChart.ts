@@ -20,15 +20,6 @@ export function effectiveness(
   return mult
 }
 
-/** Every attacking type that hits the given defending pair super-effectively. */
-export function superEffectiveAgainst(chart: TypeChart, defendTypes: readonly number[]): number[] {
-  const out: number[] = []
-  for (let a = 0; a < chart.types.length; a++) {
-    if (effectiveness(chart, a, defendTypes) > 1) out.push(a)
-  }
-  return out
-}
-
 /** "double damage (x2)" and friends, for the plain-English explanations. */
 export function describeMultiplier(mult: number): string {
   if (mult === 0) return 'no damage (immune)'

@@ -21,7 +21,6 @@ interface MoveRule {
   immuneTypes?: string[]
 }
 
-/** Best first within each effect: accuracy and reliability, roughly. */
 /** Moves that make a catch easier, best first. Their learners per hack come from catchMoves. */
 const RULES: Record<string, MoveRule> = {
   'False Swipe': { effect: 'weaken', immuneTypes: ['Ghost'] },

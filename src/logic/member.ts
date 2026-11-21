@@ -105,6 +105,13 @@ export function evolve(data: GameData, entry: RosterEntry, target: number): Rost
   return { ...next, nt: entry.nt, mv: [...entry.mv], ab: keepsAbility ? entry.ab : next.ab }
 }
 
+/** Dex indices of each evolution family, keyed by the family id (`fm`). */
+export function familiesOf(data: GameData): Map<number, number[]> {
+  const families = new Map<number, number[]>()
+  data.dex.forEach((d, i) => families.set(d.fm, [...(families.get(d.fm) ?? []), i]))
+  return families
+}
+
 /** Dex indices from one stage to a later one, both ends included; [to] when unrelated. */
 export function evolutionPath(data: GameData, from: number, to: number): number[] {
   const walk = (at: number): number[] | null => {

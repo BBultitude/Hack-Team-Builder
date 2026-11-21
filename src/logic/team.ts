@@ -1,7 +1,6 @@
 import type { GameData, Move, RosterEntry } from '../types'
 import type { Lookup } from './lookup'
-import { type Member, entryFromDex, hasStab, incomingMultiplier, resolveMember } from './member'
-import { effectiveness } from './typeChart'
+import { type Member, entryFromDex, familiesOf, hasStab, incomingMultiplier, resolveMember } from './member'
 import { STAT } from '../types'
 import { effectiveStat } from './stats'
 import { attackAbility } from './abilities'
@@ -397,8 +396,7 @@ export function lookFor(
   const { baseIdx, base, baseAnalysis, owned } = baseline(data, lookup, roster, team)
   const bst = (i: number): number => (data.dex[i]?.s ?? []).reduce((a, b) => a + b, 0)
 
-  const families = new Map<number, number[]>()
-  data.dex.forEach((d, i) => families.set(d.fm, [...(families.get(d.fm) ?? []), i]))
+  const families = familiesOf(data)
 
   const out: LookForTarget[] = []
   data.dex.forEach((d, i) => {
@@ -490,13 +488,4 @@ export function autoBuild(
   }
 
   return team.sort((a, b) => a - b)
-}
-
-/** Attack options a member brings, for display. */
-export function attackOptionNames(data: GameData, member: Member): string[] {
-  return member.attackTypes.map((t) => data.chart.types[t] ?? '?')
-}
-
-export function superEffective(data: GameData, attackType: number, defendTypes: number[]): boolean {
-  return effectiveness(data.chart, attackType, defendTypes) > 1
 }

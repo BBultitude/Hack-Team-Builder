@@ -102,8 +102,10 @@ export function SetupPanel(props: Props) {
       <div class="stack" style="margin-top:0.6rem">
         <label class="field">
           <span>Name</span>
+          {/* Not controlled: a redraw mid-typing (the sync status changing) would put the old name back. */}
           <input
-            value={active.name}
+            key={active.name}
+            defaultValue={active.name}
             maxLength={60}
             onChange={(e) => props.onRename(e.currentTarget.value.trim() || active.name)}
           />

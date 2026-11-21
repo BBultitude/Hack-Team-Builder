@@ -201,7 +201,11 @@ export function App() {
     syncing.current = true
     setSync('saving')
     try {
-      const { index, pulled, dropped } = await syncSetups(setupsRef.current)
+      const { index, pulled, dropped } = await syncSetups(
+        setupsRef.current,
+        fetch,
+        (id, stamp) => setupsRef.current.list.find((s) => s.id === id)?.updatedAt === stamp,
+      )
       const merged = mergeIndex(setupsRef.current, index, dropped)
       // What the server now has; edits made while this was in flight are newer and still get pushed.
       syncedStamp.current = stampOf(index)
@@ -304,7 +308,6 @@ export function App() {
     patchActive({ gen })
   }
 
-  /** Switches the hack, moving to its generation cap and bringing the Pokedex over to its data. */
   /** Gives a vanilla game (one saved before hack data existed) its hack; set once, never changed. */
   const changeHack = async (hack: Hack): Promise<void> => {
     if (!vanilla || !data || active.hack) return

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { data, typeIndex, dexIndex } from './testData'
-import { describeMultiplier, effectiveness, superEffectiveAgainst } from './typeChart'
+import { describeMultiplier, effectiveness } from './typeChart'
 
 const t = typeIndex
 const typesOf = (name: string): number[] => data.dex[dexIndex(name)]!.t
@@ -43,11 +43,6 @@ describe('type chart', () => {
   it('treats a quarter-resisted hit as 0.25', () => {
     // Grass resisted by both Fire and Flying.
     expect(effectiveness(data.chart, t('Grass'), typesOf('Charizard'))).toBe(0.25)
-  })
-
-  it('lists every type that threatens a defender', () => {
-    const vs = superEffectiveAgainst(data.chart, typesOf('Charizard'))
-    expect(vs.map((i) => data.chart.types[i]).sort()).toEqual(['Electric', 'Rock', 'Water'])
   })
 
   it('describes multipliers in plain English', () => {

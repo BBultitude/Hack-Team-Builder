@@ -128,6 +128,20 @@ describe('setups API', () => {
   })
 })
 
+describe('saved game limit', () => {
+  it('refuses new games past the cap but still updates existing ones', async () => {
+    const small = await start({ distDir: dist, dataDir: join(data, 'small'), maxSetups: 2 })
+    try {
+      expect((await call(small.port, 'PUT', '/api/setups/a-1', { body: setup() })).status).toBe(200)
+      expect((await call(small.port, 'PUT', '/api/setups/a-2', { body: setup() })).status).toBe(200)
+      expect((await call(small.port, 'PUT', '/api/setups/a-3', { body: setup() })).status).toBe(507)
+      expect((await call(small.port, 'PUT', '/api/setups/a-1', { body: setup({ updatedAt: 2000 }) })).status).toBe(200)
+    } finally {
+      small.server.close()
+    }
+  })
+})
+
 describe('access code', () => {
   it('requires the code for setups but not for the health check', async () => {
     const locked = await start({ distDir: dist, dataDir: join(data, 'locked'), accessCode: 'pikachu' })

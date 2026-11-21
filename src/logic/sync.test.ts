@@ -125,6 +125,29 @@ describe('sync', () => {
     expect(mergeIndex(fresh, index, dropped).list.map((s) => s.id)).toEqual(['home-1'])
   })
 
+  it('fails the sync when the server refuses a save, so the app never reads "Synced"', async () => {
+    const index = loadSetups()
+    withState(index, index.active, ['Charizard'])
+    const broken = (async (_url: string, init?: RequestInit) =>
+      new Response(JSON.stringify(init?.method === 'PUT' ? { error: 'Server error' } : []), {
+        status: init?.method === 'PUT' ? 500 : 200,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch
+    expect(statusFor(await syncSetups(index, broken).catch((e) => e))).toBe('offline')
+  })
+
+  it('does not overwrite a setup edited here while its download was in flight', async () => {
+    const index = loadSetups()
+    const mine = index.list[0]!
+    saveRaw(mine.id, { r: [{ n: 'Snorlax' }] })
+    const server = fakeServer()
+    server.store.set(mine.id, { id: mine.id, name: 'Elsewhere', gen: 9, updatedAt: mine.updatedAt + 10, state: { r: [{ n: 'Gengar' }] } })
+
+    const { pulled } = await syncSetups(index, server.fetchFn, () => false)
+    expect(pulled).toEqual([])
+    expect(loadRaw(mine.id)).toEqual({ r: [{ n: 'Snorlax' }] })
+  })
+
   it('keeps edits made while a sync was in flight', () => {
     const current = { active: 'a', list: [{ id: 'a', name: 'Renamed now', gen: 9, updatedAt: 50 }, { id: 'b', name: 'Created now', gen: 3, updatedAt: 60 }] }
     const synced = { active: 'a', list: [{ id: 'a', name: 'Old', gen: 9, updatedAt: 40 }, { id: 'c', name: 'From server', gen: 8, updatedAt: 10 }] }

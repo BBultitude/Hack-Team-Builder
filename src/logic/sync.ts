@@ -83,8 +83,16 @@ function adopt(remote: Remote): SetupMeta {
 /**
  * One full sync. Throws on no server (offline) and Locked on a missing or
  * wrong access code; the caller turns those into a status.
+ *
+ * `unchanged(id, stamp)` says whether a setup still has the stamp it had when
+ * the sync began; a pull is skipped when it does not, so an edit made while
+ * the download was in flight is not overwritten (the next sync pushes it).
  */
-export async function syncSetups(index: SetupIndex, fetchFn: Fetch = fetch): Promise<SyncResult> {
+export async function syncSetups(
+  index: SetupIndex,
+  fetchFn: Fetch = fetch,
+  unchanged: (id: string, stamp: number | undefined) => boolean = () => true,
+): Promise<SyncResult> {
   const listed = await callApi(fetchFn, 'GET', '/api/setups')
   const remote = new Map<string, SetupMeta>()
   for (const r of Array.isArray(listed.data) ? listed.data : []) {
@@ -112,7 +120,7 @@ export async function syncSetups(index: SetupIndex, fetchFn: Fetch = fetch): Pro
     const local = byId.get(r.id)
     if (local && local.updatedAt >= r.updatedAt) continue
     const full = await callApi(fetchFn, 'GET', `/api/setups/${r.id}`)
-    if (full.status !== 200) continue
+    if (full.status !== 200 || !unchanged(r.id, local?.updatedAt)) continue
     byId.set(r.id, adopt(full.data as Remote))
     pulled.push(r.id)
   }
@@ -131,6 +139,9 @@ export async function syncSetups(index: SetupIndex, fetchFn: Fetch = fetch): Pro
       // Someone saved a newer copy meanwhile: take theirs.
       byId.set(local.id, adopt(sent.data as Remote))
       pulled.push(local.id)
+    } else if (sent.status !== 200) {
+      // A refused save (full disk, unwritable volume) must not read as "Synced".
+      throw new Error(`Server refused the save (HTTP ${sent.status})`)
     }
   }
 

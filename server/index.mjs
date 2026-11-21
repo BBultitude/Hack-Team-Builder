@@ -31,6 +31,8 @@ const COMPRESSIBLE = new Set(['.html', '.js', '.css', '.json', '.svg', '.webmani
 /** Same rule the client uses for new ids; also what keeps a path inside DATA_DIR. */
 const SETUP_ID = /^[a-z0-9-]{1,40}$/
 const MAX_BODY = 512 * 1024
+/** Default cap on saved games (tombstones included), so an open API can't be used to fill the disk. */
+const MAX_SETUPS = 200
 
 function cacheControl(path) {
   // Vite content-hashes everything under /assets, so it can be cached hard.
@@ -101,7 +103,7 @@ function authorised(req, accessCode) {
   return given.length === expected.length && timingSafeEqual(given, expected)
 }
 
-export function createApp({ distDir = join(ROOT, 'dist'), dataDir = join(ROOT, '.data'), accessCode = '' } = {}) {
+export function createApp({ distDir = join(ROOT, 'dist'), dataDir = join(ROOT, '.data'), accessCode = '', maxSetups = MAX_SETUPS } = {}) {
   const dist = resolve(distDir)
   const store = resolve(dataDir)
   /** path -> { body, gz, mtime }; the built site is small, so it is held in memory. */
@@ -123,8 +125,10 @@ export function createApp({ distDir = join(ROOT, 'dist'), dataDir = join(ROOT, '
   async function readSetup(id) {
     try {
       return JSON.parse(await readFile(fileFor(id), 'utf8'))
-    } catch {
-      return null
+    } catch (e) {
+      // Missing or corrupt means "no save". Anything else (EIO, EMFILE) must not look like one, or an older copy could overwrite a newer one.
+      if (e?.code === 'ENOENT' || e instanceof SyntaxError) return null
+      throw e
     }
   }
 
@@ -180,6 +184,9 @@ export function createApp({ distDir = join(ROOT, 'dist'), dataDir = join(ROOT, '
         const next = body ?? { id, name: current?.name ?? '', gen: current?.gen ?? 9, updatedAt: Date.now(), deleted: true }
         // Last write wins; an older copy (including one racing a delete) gets the newer one back.
         if (current && current.updatedAt > next.updatedAt) return [409, current]
+        if (!current && (await readdir(store).catch(() => [])).filter((f) => f.endsWith('.json')).length >= maxSetups) {
+          return [507, { error: 'Too many saved games' }]
+        }
         await writeSetup(next)
         return [200, next]
       })

@@ -1,6 +1,6 @@
 import type { DexEntry, GameData, HackPack, Move, RosterEntry } from '../types'
 import type { Lookup } from './lookup'
-import { evolutionPath } from './member'
+import { evolutionPath, familiesOf } from './member'
 import { UNCATCHABLE_FORM } from './checklist'
 
 /**
@@ -235,8 +235,7 @@ export function runFilter(
   const baseOf = (i: number): number => index(data.dex[i]!.n.replace(/ \(.*\)$/, '')) ?? i
   const listed = new Set(variant.species.map(index).filter((i): i is number => i !== undefined))
   const legendary = new Set((pack?.legendary ?? []).map((n) => data.dex[index(n) ?? -1]?.fm))
-  const families = new Map<number, number[]>()
-  data.dex.forEach((d, i) => families.set(d.fm, [...(families.get(d.fm) ?? []), i]))
+  const families = familiesOf(data)
 
   return (i) => {
     const d = data.dex[i]

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { GameData, RosterEntry, Trainer, TrainerMon } from '../types'
 import type { Lookup } from '../logic/lookup'
 import { type Member, resolveMember } from '../logic/member'
@@ -61,6 +61,11 @@ export function OpponentTab(props: Props) {
   const { data, lookup, roster, team, opponent, scope } = props
   const [abilityDraft, setAbilityDraft] = useState(opponent?.ability ?? '')
   const [trainerDraft, setTrainerDraft] = useState(opponent?.trainer ?? '')
+  // The boxes own what is typed; a different opponent (another game loaded, a sync) replaces it.
+  useEffect(() => {
+    setAbilityDraft(opponent?.ability ?? '')
+    setTrainerDraft(opponent?.trainer ?? '')
+  }, [opponent?.name, opponent?.trainer])
   const trainer = props.trainers.find((t) => t.name === trainerDraft)
   const outIndex = props.out
 
